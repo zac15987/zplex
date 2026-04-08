@@ -173,17 +173,48 @@ func TestSessionInfo(t *testing.T) {
 // Session auto-detect exit — verify Done() channel and status change.
 // ---------------------------------------------------------------------------
 
+func TestSession_NaturalExit(t *testing.T) {
+	// Test that when the shell exits naturally (via "exit" command),
+	// the session detects it: Status becomes "exited" and Done() closes.
+	sess, err := NewSession("test-natural-exit", "natural exit test", "powershell", 102400)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	// Verify session starts in running state.
+	info := sess.Info()
+	if info.Status != "running" {
+		t.Fatalf("expected initial status %q, got %q", "running", info.Status)
+	}
+
+	// Tell the shell to exit naturally.
+	_, err = sess.Write([]byte("exit\r\n"))
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Wait for the session to detect exit (with timeout).
+	select {
+	case <-sess.Done():
+		// Good — the session detected the natural exit.
+	case <-time.After(10 * time.Second):
+		sess.Close()
+		t.Fatal("timed out waiting for session to detect natural exit")
+	}
+
+	// Status should now be "exited" with exit code 0.
+	info = sess.Info()
+	if info.Status != "exited" {
+		t.Errorf("expected status %q, got %q", "exited", info.Status)
+	}
+	if info.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", info.ExitCode)
+	}
+}
+
 func TestSession_CloseSignalsDone(t *testing.T) {
 	// Test that Close() terminates the subprocess, closes the Done
 	// channel, and transitions Status to "exited".
-	//
-	// NOTE: On Windows ConPTY, pty.Read() does not return EOF when the
-	// child process exits naturally — it blocks indefinitely. This means
-	// the readLoop never reaches cmd.Wait() for a naturally exiting
-	// process. Auto-detect of natural exit requires a design change in
-	// readLoop (e.g. calling cmd.Wait in a separate goroutine). For now
-	// we test the Close()-driven exit path, which is the primary
-	// mechanism used by Kill() and Shutdown().
 	sess, err := NewSession("test-close-done", "close done test", "cmd.exe", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)

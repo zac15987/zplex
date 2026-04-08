@@ -33,11 +33,12 @@ type Session struct {
 	PID       int
 	ExitCode  int
 
-	pty     pty.Pty     // PTY handle (ConPTY on Windows, /dev/ptmx on Unix)
-	cmd     *pty.Cmd    // the running subprocess
-	ringBuf *ringBuffer // circular buffer for replay
-	mu      sync.Mutex  // protects Status, ExitCode, ringBuf writes
-	done    chan struct{}
+	pty      pty.Pty     // PTY handle (ConPTY on Windows, /dev/ptmx on Unix)
+	cmd      *pty.Cmd    // the running subprocess
+	ringBuf  *ringBuffer // circular buffer for replay
+	mu       sync.Mutex  // protects Status, ExitCode, ringBuf writes
+	done     chan struct{}
+	closePTY sync.Once // ensures PTY is closed exactly once
 }
 
 // readBufSize is the size of the temporary buffer used when reading PTY output
@@ -100,7 +101,39 @@ func NewSession(id, title, shell string, bufferSize int) (*Session, error) {
 
 // readLoop continuously reads PTY output, writes it into the ring buffer,
 // and waits for the subprocess to exit.
+//
+// On Windows ConPTY, pty.Read() does not return EOF when the child process
+// exits — it blocks indefinitely. To handle this, we run cmd.Wait() in a
+// separate goroutine. When the process exits, that goroutine closes the PTY,
+// which unblocks the Read call with an error so the loop can terminate.
 func (s *Session) readLoop() {
+	// waitDone is closed once cmd.Wait() completes and the exit code is captured.
+	waitDone := make(chan struct{})
+	go func() {
+		defer close(waitDone)
+		waitErr := s.cmd.Wait()
+		exitCode := 0
+		if s.cmd.ProcessState != nil {
+			exitCode = s.cmd.ProcessState.ExitCode()
+		} else if waitErr != nil {
+			exitCode = -1
+		}
+
+		s.mu.Lock()
+		s.Status = "exited"
+		s.ExitCode = exitCode
+		s.mu.Unlock()
+
+		slog.Info("session.readLoop: process exited",
+			slog.String("session_id", s.ID),
+			slog.Int("exit_code", exitCode),
+		)
+
+		// Close the PTY to unblock any pending Read call.
+		// Uses sync.Once so it's safe if Close() also triggers this.
+		s.closePTY.Do(func() { s.pty.Close() })
+	}()
+
 	buf := make([]byte, readBufSize)
 	for {
 		n, err := s.pty.Read(buf)
@@ -110,9 +143,8 @@ func (s *Session) readLoop() {
 			s.mu.Unlock()
 		}
 		if err != nil {
-			// EOF or read error — process has likely exited.
 			if err != io.EOF {
-				slog.Warn("session.readLoop: PTY read error",
+				slog.Debug("session.readLoop: PTY read ended",
 					slog.String("session_id", s.ID),
 					slog.String("error", err.Error()),
 				)
@@ -121,26 +153,13 @@ func (s *Session) readLoop() {
 		}
 	}
 
-	// Wait for the subprocess to finish and capture the exit code.
-	waitErr := s.cmd.Wait()
-	exitCode := 0
-	if s.cmd.ProcessState != nil {
-		exitCode = s.cmd.ProcessState.ExitCode()
-	} else if waitErr != nil {
-		// If ProcessState is nil but Wait returned an error, mark as -1.
-		exitCode = -1
-	}
-
-	s.mu.Lock()
-	s.Status = "exited"
-	s.ExitCode = exitCode
-	s.mu.Unlock()
+	// Wait for the cmd.Wait goroutine to finish capturing exit state.
+	<-waitDone
 
 	close(s.done)
 
-	slog.Info("session.readLoop: session exited",
+	slog.Info("session.readLoop: session fully stopped",
 		slog.String("session_id", s.ID),
-		slog.Int("exit_code", exitCode),
 	)
 }
 
@@ -174,13 +193,15 @@ func (s *Session) Close() error {
 		}
 	}
 
-	err := s.pty.Close()
+	// Close the PTY. The readLoop's Wait goroutine may have already closed
+	// it after the process exited naturally; sync.Once ensures no double close.
+	s.closePTY.Do(func() { s.pty.Close() })
 
 	// Wait for the readLoop goroutine to finish.
 	<-s.done
 
 	slog.Info("session.Close: session closed", slog.String("session_id", s.ID))
-	return err
+	return nil
 }
 
 // Done returns a channel that is closed when the session's subprocess exits.
