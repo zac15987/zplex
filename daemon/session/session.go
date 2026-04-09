@@ -225,6 +225,35 @@ func (s *Session) Info() SessionInfo {
 	}
 }
 
+// Resize changes the PTY window size. It delegates to the underlying PTY's
+// Resize method. This is called when the frontend sends a resize message.
+func (s *Session) Resize(cols, rows int) error {
+	slog.Info("session.Resize: resizing PTY",
+		slog.String("session_id", s.ID),
+		slog.Int("cols", cols),
+		slog.Int("rows", rows),
+	)
+	return s.pty.Resize(cols, rows)
+}
+
+// UpdateMeta updates the session's mutable metadata fields.
+// Empty strings are ignored (only non-empty values are applied).
+func (s *Session) UpdateMeta(title, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if title != "" {
+		s.Title = title
+	}
+	if status != "" {
+		s.Status = status
+	}
+	slog.Info("session.UpdateMeta: metadata updated",
+		slog.String("session_id", s.ID),
+		slog.String("title", s.Title),
+		slog.String("status", s.Status),
+	)
+}
+
 // BufferData returns a copy of all data currently stored in the ring buffer,
 // ordered from oldest to newest. This is used for reconnect replay.
 func (s *Session) BufferData() []byte {
