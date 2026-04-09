@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 
@@ -98,30 +97,20 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// Step 2: Writer goroutine — reads live PTY output and forwards to WebSocket.
+	// Step 2: Writer goroutine — subscribes to live PTY output from the
+	// session's readLoop and forwards each chunk to the WebSocket client.
+	outputCh := sess.Subscribe()
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := sess.Read(buf)
-			if n > 0 {
-				msg := wsOutputMessage{Type: "output", Data: string(buf[:n])}
-				if writeErr := conn.WriteJSON(msg); writeErr != nil {
-					slog.Debug("server.handleWebSocket: write to WS failed",
-						slog.String("session_id", sessionID),
-						slog.String("error", writeErr.Error()),
-					)
-					return
-				}
-			}
-			if readErr != nil {
-				if readErr != io.EOF {
-					slog.Debug("server.handleWebSocket: PTY read ended",
-						slog.String("session_id", sessionID),
-						slog.String("error", readErr.Error()),
-					)
-				}
+		defer sess.Unsubscribe(outputCh)
+		for data := range outputCh {
+			msg := wsOutputMessage{Type: "output", Data: string(data)}
+			if writeErr := conn.WriteJSON(msg); writeErr != nil {
+				slog.Debug("server.handleWebSocket: write to WS failed",
+					slog.String("session_id", sessionID),
+					slog.String("error", writeErr.Error()),
+				)
 				return
 			}
 		}
