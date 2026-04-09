@@ -36,9 +36,14 @@ type Session struct {
 	pty      pty.Pty     // PTY handle (ConPTY on Windows, /dev/ptmx on Unix)
 	cmd      *pty.Cmd    // the running subprocess
 	ringBuf  *ringBuffer // circular buffer for replay
-	mu       sync.Mutex  // protects Status, ExitCode, ringBuf writes
+	mu       sync.Mutex  // protects Status, ExitCode, ringBuf writes, subscribers
 	done     chan struct{}
 	closePTY sync.Once // ensures PTY is closed exactly once
+
+	// subscribers receive copies of live PTY output from the readLoop.
+	// Each subscriber is a buffered channel; slow consumers are skipped
+	// to avoid blocking the readLoop.
+	subscribers []chan []byte
 }
 
 // readBufSize is the size of the temporary buffer used when reading PTY output
@@ -138,8 +143,24 @@ func (s *Session) readLoop() {
 	for {
 		n, err := s.pty.Read(buf)
 		if n > 0 {
+			// Make a copy for subscribers before taking the lock so we
+			// can send without holding the mutex longer than needed.
+			data := make([]byte, n)
+			copy(data, buf[:n])
+
 			s.mu.Lock()
-			s.ringBuf.Write(buf[:n])
+			s.ringBuf.Write(data)
+			for _, sub := range s.subscribers {
+				select {
+				case sub <- data:
+				default:
+					// Subscriber too slow — drop this chunk to avoid
+					// blocking the readLoop.
+					slog.Warn("session.readLoop: dropped output for slow subscriber",
+						slog.String("session_id", s.ID),
+					)
+				}
+			}
 			s.mu.Unlock()
 		}
 		if err != nil {
@@ -156,6 +177,15 @@ func (s *Session) readLoop() {
 	// Wait for the cmd.Wait goroutine to finish capturing exit state.
 	<-waitDone
 
+	// Close all subscriber channels so that consumers (e.g., WebSocket
+	// writer goroutines using range) terminate cleanly.
+	s.mu.Lock()
+	for _, sub := range s.subscribers {
+		close(sub)
+	}
+	s.subscribers = nil
+	s.mu.Unlock()
+
 	close(s.done)
 
 	slog.Info("session.readLoop: session fully stopped",
@@ -163,9 +193,52 @@ func (s *Session) readLoop() {
 	)
 }
 
-// Read reads PTY output directly. This is the primary interface for
-// WebSocket consumers that forward live output to the frontend.
-// The ring buffer is populated separately by the background goroutine.
+// subscriberBufSize is the channel buffer size for output subscribers.
+// A generous buffer prevents the readLoop from dropping data for
+// subscribers that are briefly slow.
+const subscriberBufSize = 256
+
+// Subscribe returns a channel that receives copies of live PTY output.
+// The caller must call Unsubscribe when done to avoid resource leaks.
+// Each message on the channel is an independent byte slice that the
+// subscriber owns (safe to retain).
+func (s *Session) Subscribe() chan []byte {
+	ch := make(chan []byte, subscriberBufSize)
+	s.mu.Lock()
+	s.subscribers = append(s.subscribers, ch)
+	s.mu.Unlock()
+	slog.Info("session.Subscribe: subscriber added",
+		slog.String("session_id", s.ID),
+	)
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel and closes it. After this call
+// the channel will receive no further messages. If the session has already
+// exited (readLoop closed all subscribers), this is a safe no-op.
+func (s *Session) Unsubscribe(ch chan []byte) {
+	s.mu.Lock()
+	for i, sub := range s.subscribers {
+		if sub == ch {
+			s.subscribers = append(s.subscribers[:i], s.subscribers[i+1:]...)
+			close(ch)
+			s.mu.Unlock()
+			slog.Info("session.Unsubscribe: subscriber removed",
+				slog.String("session_id", s.ID),
+			)
+			return
+		}
+	}
+	s.mu.Unlock()
+	// Channel was already closed by readLoop on session exit — nothing to do.
+	slog.Info("session.Unsubscribe: subscriber already removed (session exited)",
+		slog.String("session_id", s.ID),
+	)
+}
+
+// Read reads PTY output directly. This is a low-level interface; prefer
+// Subscribe for WebSocket consumers that need live output without competing
+// with the background readLoop.
 func (s *Session) Read(p []byte) (int, error) {
 	return s.pty.Read(p)
 }
@@ -223,6 +296,35 @@ func (s *Session) Info() SessionInfo {
 		PID:       s.PID,
 		ExitCode:  s.ExitCode,
 	}
+}
+
+// Resize changes the PTY window size. It delegates to the underlying PTY's
+// Resize method. This is called when the frontend sends a resize message.
+func (s *Session) Resize(cols, rows int) error {
+	slog.Info("session.Resize: resizing PTY",
+		slog.String("session_id", s.ID),
+		slog.Int("cols", cols),
+		slog.Int("rows", rows),
+	)
+	return s.pty.Resize(cols, rows)
+}
+
+// UpdateMeta updates the session's mutable metadata fields.
+// Empty strings are ignored (only non-empty values are applied).
+func (s *Session) UpdateMeta(title, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if title != "" {
+		s.Title = title
+	}
+	if status != "" {
+		s.Status = status
+	}
+	slog.Info("session.UpdateMeta: metadata updated",
+		slog.String("session_id", s.ID),
+		slog.String("title", s.Title),
+		slog.String("status", s.Status),
+	)
 }
 
 // BufferData returns a copy of all data currently stored in the ring buffer,

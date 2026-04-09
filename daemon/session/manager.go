@@ -60,6 +60,67 @@ func (m *SessionManager) Create(title string) (*Session, error) {
 	return sess, nil
 }
 
+// CreateOptions holds parameters for creating a new session.
+type CreateOptions struct {
+	Shell string
+	Title string
+	Cols  int
+	Rows  int
+}
+
+// CreateSession spawns a new PTY-backed session with the given options.
+// If Shell is empty, the manager's default shell is used.
+// If Cols/Rows are non-zero, the PTY is resized after creation.
+func (m *SessionManager) CreateSession(opts CreateOptions) (*Session, error) {
+	slog.Info("manager.CreateSession: creating session",
+		slog.String("title", opts.Title),
+		slog.String("shell", opts.Shell),
+		slog.Int("cols", opts.Cols),
+		slog.Int("rows", opts.Rows),
+	)
+
+	shell := opts.Shell
+	if shell == "" {
+		shell = m.shell
+	}
+
+	id := "s-" + generateID()
+
+	sess, err := NewSession(id, opts.Title, shell, m.bufferSize)
+	if err != nil {
+		slog.Error("manager.CreateSession: failed to create session",
+			slog.String("title", opts.Title),
+			slog.String("error", err.Error()),
+		)
+		return nil, err
+	}
+
+	// Resize if cols/rows specified.
+	if opts.Cols > 0 && opts.Rows > 0 {
+		if err := sess.Resize(opts.Cols, opts.Rows); err != nil {
+			slog.Warn("manager.CreateSession: failed to resize session",
+				slog.String("session_id", id),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: session is still usable at default size.
+		}
+	}
+
+	m.mu.Lock()
+	m.sessions[id] = sess
+	m.mu.Unlock()
+
+	slog.Info("manager.CreateSession: session created", slog.String("session_id", id))
+	return sess, nil
+}
+
+// Count returns the number of active sessions.
+func (m *SessionManager) Count() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions)
+}
+
 // Get returns the session with the given ID. If no session exists for that ID,
 // it returns ErrSessionNotFound.
 func (m *SessionManager) Get(id string) (*Session, error) {
