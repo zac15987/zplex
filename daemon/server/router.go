@@ -1,0 +1,113 @@
+// Package server implements the HTTP API layer for the zplex daemon.
+// It provides REST endpoints, CORS middleware, and request logging.
+package server
+
+import (
+	"log/slog"
+	"net/http"
+	"regexp"
+	"time"
+
+	"github.com/zac15987/zplex/daemon/session"
+)
+
+// localhostOriginPattern matches http://localhost with an optional port.
+var localhostOriginPattern = regexp.MustCompile(`^http://localhost(:\d+)?$`)
+
+// allowedMethods lists the HTTP methods permitted in CORS preflight responses.
+const allowedMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+
+// allowedHeaders lists the request headers permitted in CORS preflight responses.
+const allowedHeaders = "Content-Type, Authorization"
+
+// Server holds references shared by all HTTP handlers.
+type Server struct {
+	mgr       *session.SessionManager
+	startTime time.Time
+	version   string
+}
+
+// NewServer creates a Server wired to the given session manager. The returned
+// Server exposes a Handler() method that produces a fully-configured
+// http.Handler (mux + middleware).
+func NewServer(mgr *session.SessionManager) *Server {
+	slog.Info("server.NewServer: initializing HTTP server")
+	return &Server{
+		mgr:       mgr,
+		startTime: time.Now(),
+		version:   "0.1.0",
+	}
+}
+
+// Handler builds the HTTP handler chain: routes -> logging -> CORS.
+// The outermost middleware executes first on each request.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /api/health", s.handleHealth)
+
+	// Middleware chain: CORS wraps logging wraps routing.
+	return corsMiddleware(loggingMiddleware(mux))
+}
+
+// ---------------------------------------------------------------------------
+// CORS middleware
+// ---------------------------------------------------------------------------
+
+// corsMiddleware adds CORS headers for http://localhost:* origins and handles
+// OPTIONS preflight requests. Requests from non-localhost origins are served
+// normally but without CORS headers.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+
+		if localhostOriginPattern.MatchString(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", allowedMethods)
+			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Logging middleware
+// ---------------------------------------------------------------------------
+
+// responseWriter wraps http.ResponseWriter to capture the status code written
+// by downstream handlers so the logging middleware can report it.
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+// WriteHeader captures the status code before delegating to the underlying
+// ResponseWriter.
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// loggingMiddleware logs every HTTP request with method, path, status code,
+// and duration.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+
+		slog.Info("server: request completed",
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", rw.statusCode),
+			slog.Duration("duration", time.Since(start)),
+		)
+	})
+}
