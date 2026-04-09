@@ -51,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.handlePatchSession)
 
+	mux.HandleFunc("GET /ws/{session_id}", s.handleWebSocket)
+
 	// Middleware chain: CORS wraps logging wraps routing.
 	return corsMiddleware(loggingMiddleware(mux))
 }
