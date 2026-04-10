@@ -5,3 +5,8 @@
 .claude/hooks/
 .claude/settings.local.json
 .mcp.json
+
+# Electron app
+app/node_modules/
+app/dist/
+app/dist-electron/

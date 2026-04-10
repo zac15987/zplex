@@ -4,6 +4,30 @@ A terminal multiplexer desktop app purpose-built for [zpit](https://github.com/z
 
 Replaces scattered terminal tabs with a single Electron window — one fixed panel for zpit's TUI, plus dynamically spawned panels for each Claude Code agent.
 
+## Quick Start
+
+### Prerequisites
+- Go 1.22+ (for daemon)
+- Node.js 20+ (for Electron app)
+- PowerShell 7+ (`pwsh`) — default shell for terminal sessions
+
+### Build & Run
+
+1. **Build the daemon:**
+   ```bash
+   cd daemon
+   go build -o zplex-daemon.exe .
+   ```
+
+2. **Install and run the Electron app:**
+   ```bash
+   cd app
+   npm install
+   npm run dev      # dev mode (Vite + Electron)
+   npm run build    # production build
+   npm run preview  # run Electron with production build
+   ```
+
 ## Architecture
 
 **Daemon/Client model** (like tmux server/client):
