@@ -1,0 +1,24 @@
+{
+  "name": "zplex-app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && electron .\"",
+    "build": "tsc -p tsconfig.electron.json && vite build",
+    "preview": "electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xterm/xterm": "^6.0.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-webgl": "^0.19.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "electron": "^41.0.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.0.0",
+    "wait-on": "^8.0.0"
+  }
+}
