@@ -17,7 +17,7 @@ import (
 // Default values for daemon configuration.
 const (
 	DefaultPort       = 17732
-	DefaultShell      = "powershell"
+	DefaultShell      = "pwsh"
 	DefaultBufferSize = 102400
 )
 

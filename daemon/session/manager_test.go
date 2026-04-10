@@ -110,7 +110,7 @@ func TestRingBuffer_EmptyWrite(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionCreate_PTYIO(t *testing.T) {
-	sess, err := NewSession("test-io", "test IO session", "powershell", 102400)
+	sess, err := NewSession("test-io", "test IO session", "pwsh", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestSessionCreate_PTYIO(t *testing.T) {
 }
 
 func TestSessionInfo(t *testing.T) {
-	sess, err := NewSession("test-info", "info test", "powershell", 102400)
+	sess, err := NewSession("test-info", "info test", "pwsh", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestSessionInfo(t *testing.T) {
 func TestSession_NaturalExit(t *testing.T) {
 	// Test that when the shell exits naturally (via "exit" command),
 	// the session detects it: Status becomes "exited" and Done() closes.
-	sess, err := NewSession("test-natural-exit", "natural exit test", "powershell", 102400)
+	sess, err := NewSession("test-natural-exit", "natural exit test", "pwsh", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestSession_CloseSignalsDone(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManager_CRUD(t *testing.T) {
-	mgr := NewSessionManager("powershell", 102400)
+	mgr := NewSessionManager("pwsh", 102400)
 	defer mgr.Shutdown()
 
 	// Create
@@ -318,7 +318,7 @@ func TestManager_CRUD(t *testing.T) {
 }
 
 func TestManager_MultipleSessions(t *testing.T) {
-	mgr := NewSessionManager("powershell", 102400)
+	mgr := NewSessionManager("pwsh", 102400)
 	defer mgr.Shutdown()
 
 	// Create multiple sessions.
@@ -356,7 +356,7 @@ func TestManager_MultipleSessions(t *testing.T) {
 }
 
 func TestManager_Shutdown(t *testing.T) {
-	mgr := NewSessionManager("powershell", 102400)
+	mgr := NewSessionManager("pwsh", 102400)
 
 	_, err := mgr.Create("shutdown test 1")
 	if err != nil {

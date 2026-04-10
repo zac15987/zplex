@@ -17,7 +17,7 @@ import (
 // automatically when the test finishes.
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
-	mgr := session.NewSessionManager("powershell", 102400)
+	mgr := session.NewSessionManager("pwsh", 102400)
 	srv := NewServer(mgr)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
@@ -37,7 +37,7 @@ func wsURL(ts *httptest.Server, path string) string {
 func createTestSession(t *testing.T, ts *httptest.Server, title string) string {
 	t.Helper()
 
-	body := `{"shell":"powershell","title":"` + title + `"}`
+	body := `{"shell":"pwsh","title":"` + title + `"}`
 	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("createTestSession: POST failed: %v", err)
@@ -161,7 +161,7 @@ func TestListSessions_AfterCreate(t *testing.T) {
 func TestCreateSession_Success(t *testing.T) {
 	_, ts := newTestServer(t)
 
-	body := `{"shell":"powershell","title":"create-test"}`
+	body := `{"shell":"pwsh","title":"create-test"}`
 	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST /api/sessions failed: %v", err)
@@ -193,7 +193,7 @@ func TestCreateSession_MissingFields(t *testing.T) {
 		body string
 	}{
 		{name: "missing shell", body: `{"title":"test"}`},
-		{name: "missing title", body: `{"shell":"powershell"}`},
+		{name: "missing title", body: `{"shell":"pwsh"}`},
 	}
 
 	for _, tc := range tests {
