@@ -18,7 +18,8 @@ go build -o zplex-daemon.exe .    # build
 go run .                           # run (default port 17732)
 go run . --port 17732              # explicit port
 go test ./...                      # all tests
-go test ./session/                 # single package tests
+go test ./session/                 # session package tests
+go test ./server/                  # server package tests (REST + WebSocket)
 go test -run TestSessionCreate ./session/  # single test
 ```
 
@@ -74,7 +75,7 @@ Go Daemon (single binary, port 17732)
 
 - **xterm.js v6**: Use `@xterm/xterm` and `@xterm/addon-*` (scoped packages). The old unscoped `xterm-addon-*` packages are deprecated and must NOT be used.
 - **Go PTY**: `aymanbagabas/go-pty` — handles ConPTY (Windows) and /dev/ptmx (Unix).
-- **WebSocket**: `gorilla/websocket` v1.5.0 — must be >=v1.4.1 (DoS fix).
+- **WebSocket**: `gorilla/websocket` v1.5.3 — must be >=v1.4.1 (DoS fix).
 - **Go logging**: `log/slog` (structured). No `fmt.Println` for logging.
 - **Frontend logging**: `console.warn`/`console.error` only. No `console.log` in production code.
 - **TypeScript**: Strict mode. No `any`. Prefer `const`.

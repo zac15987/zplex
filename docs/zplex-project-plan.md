@@ -1,7 +1,7 @@
 # zplex — Project Plan
 
-> Version: 1.0
-> Date: 2026-04-03
+> Version: 1.1
+> Date: 2026-04-10
 > Author: Jeff (zac) + Claude
 > Repo: github.com/zac15987/zplex
 > License: MIT
@@ -128,7 +128,7 @@ Default: **17732** (zpit broker uses 17731, zplex daemon uses 17731 + 1).
 |---|---|---|---|
 | **Go daemon** | | | |
 | PTY | `aymanbagabas/go-pty` | v0.2.2 | Cross-platform (Unix PTY + Windows ConPTY) |
-| WebSocket | `gorilla/websocket` | v1.5.0 | Stable, must be ≥v1.4.1 (DoS fix) |
+| WebSocket | `gorilla/websocket` | v1.5.3 | Stable, must be ≥v1.4.1 (DoS fix) |
 | HTTP | `net/http` (stdlib) | — | |
 | JSON | `encoding/json` (stdlib) | — | |
 | **Electron** | | | |
@@ -205,15 +205,20 @@ zplex/
 
 ## 5. Milestones
 
+> **Progress (2026-04-10):** Issues #1 and #2 complete — the entire Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay). Next step: Electron shell + xterm.js frontend.
+>
+> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. Remaining issues use TBD as they haven't been filed on GitHub yet.
+
 ### M1: Skeleton — single terminal works end-to-end
 
 **Goal:** Launch zplex → see one terminal → type commands → close window → reopen → session resumes.
 
-| Issue | Title | Description | Depends |
-|---|---|---|---|
-| #1 | Go daemon: PTY session manager + WebSocket server | Session CRUD, PTY spawn (ConPTY), WebSocket bidirectional I/O, ring buffer for reconnect, REST API, health endpoint | — |
-| #2 | Electron shell + xterm.js single panel | Electron main process spawns daemon, BrowserWindow loads frontend, xterm.js connects via WebSocket, basic resize handling | #1 |
-| #3 | Session persistence: close Electron, reopen, resume | Electron close → daemon keeps running (not child process kill). Electron reopen → detect running daemon → reconnect. Ring buffer replay for screen restore | #2 |
+| Issue | Title | Description | Status | Depends |
+|---|---|---|---|---|
+| #1 | Go daemon: Session layer + PTY management | Config (4-layer priority: defaults < TOML < env < CLI flags), Session struct (PTY + ring buffer), SessionManager CRUD, ConPTY support (Windows EOF fix via `sync.Once`), graceful shutdown | ✅ Done (PR #3, 2026-04-08) | — |
+| #2 | HTTP Server + WebSocket — PTY I/O relay | REST API (health + session CRUD), WebSocket bidirectional PTY I/O, ring buffer replay on connect, CORS/logging middleware, subscriber pattern for fan-out to multiple WS clients | ✅ Done (PR #4, 2026-04-09) | #1 |
+| TBD | Electron shell + xterm.js single panel | Electron main process spawns daemon, BrowserWindow loads frontend, xterm.js connects via WebSocket, basic resize handling | Planned | #2 |
+| TBD | Session persistence: close Electron, reopen, resume | Electron close → daemon keeps running (not child process kill). Electron reopen → detect running daemon → reconnect. Ring buffer replay for screen restore | Planned | Electron shell |
 
 **Demo scenario after M1:**
 1. Run zplex → Electron window opens → single terminal panel (PowerShell)
@@ -227,11 +232,11 @@ zplex/
 
 **Goal:** Open multiple terminal panels side-by-side, resize, navigate.
 
-| Issue | Title | Description | Depends |
-|---|---|---|---|
-| #4 | Frontend: multi-panel layout with CSS Grid | Add panel (button + keyboard shortcut), remove panel, CSS Grid dynamic columns/rows, each panel is an xterm.js instance connected to a separate daemon session | #3 |
-| #5 | Panel resize + keyboard navigation | Drag-to-resize panel borders, keyboard shortcuts (Ctrl+Shift+Arrow to navigate, Ctrl+Shift+N to new panel), focus indicator (highlighted border) | #4 |
-| #6 | Layout persistence | Save panel layout + session mapping to daemon (GET/PUT /api/layout). On reconnect, restore exact panel arrangement | #5 |
+| Issue | Title | Description | Status | Depends |
+|---|---|---|---|---|
+| TBD | Frontend: multi-panel layout with CSS Grid | Add panel (button + keyboard shortcut), remove panel, CSS Grid dynamic columns/rows, each panel is an xterm.js instance connected to a separate daemon session | Planned | M1 |
+| TBD | Panel resize + keyboard navigation | Drag-to-resize panel borders, keyboard shortcuts (Ctrl+Shift+Arrow to navigate, Ctrl+Shift+N to new panel), focus indicator (highlighted border) | Planned | multi-panel |
+| TBD | Layout persistence | Save panel layout + session mapping to daemon (GET/PUT /api/layout). On reconnect, restore exact panel arrangement | Planned | panel resize |
 
 **Demo scenario after M2:**
 1. Open zplex → one panel
@@ -246,10 +251,10 @@ zplex/
 
 **Goal:** zplex auto-launches zpit in a fixed left panel. Other panels are for agents.
 
-| Issue | Title | Description | Depends |
-|---|---|---|---|
-| #7 | Daemon: auto-create zpit session on startup | Read zpit config location (env `ZPIT_CONFIG` or `~/.zpit/config.toml`). On daemon start, create a special session running `zpit` binary. Mark as "fixed" (cannot be killed from UI) | #6 |
-| #8 | Frontend: fixed panel vs dynamic panels | Left panel always shows zpit session (not closable, distinct border/header). Right area is dynamic panel grid for agents. Layout: `[fixed 35%] [dynamic 65%]` adjustable | #7 |
+| Issue | Title | Description | Status | Depends |
+|---|---|---|---|---|
+| TBD | Daemon: auto-create zpit session on startup | Read zpit config location (env `ZPIT_CONFIG` or `~/.zpit/config.toml`). On daemon start, create a special session running `zpit` binary. Mark as "fixed" (cannot be killed from UI) | Planned | M2 |
+| TBD | Frontend: fixed panel vs dynamic panels | Left panel always shows zpit session (not closable, distinct border/header). Right area is dynamic panel grid for agents. Layout: `[fixed 35%] [dynamic 65%]` adjustable | Planned | zpit session |
 
 **Demo scenario after M3:**
 1. Open zplex → left panel shows zpit TUI, right area is empty
@@ -262,12 +267,12 @@ zplex/
 
 **Goal:** When zpit's loop engine spawns a Claude Code agent, it appears as a new panel in zplex instead of a new Windows Terminal tab.
 
-| Issue | Title | Description | Depends |
-|---|---|---|---|
-| #9 | Daemon: session creation API with metadata | Extend POST /api/sessions to accept `source: "zpit"`, `project_id`, `issue_id`, `role` (coder/reviewer). Store metadata for UI display | #8 |
-| #10 | [zpit repo] New launcher backend: zplex | Add `platform.EnvZplex` detection (check if zplex daemon is running on port 17732). Add `launchZplex()` / `launchZplexInDir()` functions that POST to daemon API instead of exec wt.exe. Add `zplex_mode` to `TerminalConfig`. Fallback: if daemon unreachable, fall back to Windows Terminal | M3 |
-| #11 | Frontend: panel status sync with zpit loop | Daemon exposes SSE endpoint `/api/events` for panel status updates. When zpit loop transitions state (coding → reviewing → done), update panel header color/icon. Green = active, yellow = waiting permission, grey = done | #10 |
-| #12 | Frontend: permission focus navigation | When zpit detects agent needs permission (existing signal file mechanism), zplex highlights that panel's border (pulsing yellow) and provides keyboard shortcut to jump to it | #11 |
+| Issue | Title | Description | Status | Depends |
+|---|---|---|---|---|
+| TBD | Daemon: session creation API with metadata | Extend POST /api/sessions to accept `source: "zpit"`, `project_id`, `issue_id`, `role` (coder/reviewer). Store metadata for UI display | Planned | M3 |
+| TBD | [zpit repo] New launcher backend: zplex | Add `platform.EnvZplex` detection (check if zplex daemon is running on port 17732). Add `launchZplex()` / `launchZplexInDir()` functions that POST to daemon API instead of exec wt.exe. Add `zplex_mode` to `TerminalConfig`. Fallback: if daemon unreachable, fall back to Windows Terminal | Planned | M3 |
+| TBD | Frontend: panel status sync with zpit loop | Daemon exposes SSE endpoint `/api/events` for panel status updates. When zpit loop transitions state (coding → reviewing → done), update panel header color/icon. Green = active, yellow = waiting permission, grey = done | Planned | zpit launcher |
+| TBD | Frontend: permission focus navigation | When zpit detects agent needs permission (existing signal file mechanism), zplex highlights that panel's border (pulsing yellow) and provides keyboard shortcut to jump to it | Planned | panel status sync |
 
 **Integration architecture (M4 complete):**
 
@@ -290,7 +295,7 @@ zpit (running inside zplex's fixed panel)
             → panel auto-appears in zplex UI
 ```
 
-**Changes required in zpit repo (issue #10):**
+**Changes required in zpit repo:**
 
 | File | Change |
 |---|---|
@@ -305,12 +310,12 @@ zpit (running inside zplex's fixed panel)
 
 **Goal:** System tray, installer, one-click experience.
 
-| Issue | Title | Description | Depends |
-|---|---|---|---|
-| #13 | Electron: system tray + minimize to tray | Tray icon with context menu (Show/Hide, Quit). Close button minimizes to tray (daemon keeps running). Double-click tray icon restores window | #12 |
-| #14 | Electron: auto-start daemon lifecycle | On app launch: check if daemon already running → connect. If not → spawn daemon. On app "Quit" (not close): offer to stop daemon or keep running | #13 |
-| #15 | electron-builder: Windows installer (.exe) | Build script: compile Go daemon for Windows amd64, bundle with Electron, produce NSIS installer. Include desktop shortcut and start menu entry | #14 |
-| #16 | UX polish: theme, fonts, welcome screen | Dark theme matching zpit aesthetic. Monospace font selection. Welcome screen when no sessions exist (instructions + quick-start button) | #15 |
+| Issue | Title | Description | Status | Depends |
+|---|---|---|---|---|
+| TBD | Electron: system tray + minimize to tray | Tray icon with context menu (Show/Hide, Quit). Close button minimizes to tray (daemon keeps running). Double-click tray icon restores window | Planned | M4 |
+| TBD | Electron: auto-start daemon lifecycle | On app launch: check if daemon already running → connect. If not → spawn daemon. On app "Quit" (not close): offer to stop daemon or keep running | Planned | system tray |
+| TBD | electron-builder: Windows installer (.exe) | Build script: compile Go daemon for Windows amd64, bundle with Electron, produce NSIS installer. Include desktop shortcut and start menu entry | Planned | daemon lifecycle |
+| TBD | UX polish: theme, fonts, welcome screen | Dark theme matching zpit aesthetic. Monospace font selection. Welcome screen when no sessions exist (instructions + quick-start button) | Planned | installer |
 
 ---
 
