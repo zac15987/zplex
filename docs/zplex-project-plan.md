@@ -89,7 +89,7 @@ Before zplex:                          After zplex:
 
 ```
 Create session:
-  POST /api/sessions { shell: "powershell", cwd: "D:\...", title: "Claude #1" }
+  POST /api/sessions { shell: "pwsh", cwd: "D:\...", title: "Claude #1" }
   → daemon spawns PTY → returns { id: "abc123", ws_url: "/ws/abc123" }
 
 Connect to session:
@@ -217,11 +217,10 @@ zplex/
 |---|---|---|---|---|
 | #1 | Go daemon: Session layer + PTY management | Config (4-layer priority: defaults < TOML < env < CLI flags), Session struct (PTY + ring buffer), SessionManager CRUD, ConPTY support (Windows EOF fix via `sync.Once`), graceful shutdown | ✅ Done (PR #3, 2026-04-08) | — |
 | #2 | HTTP Server + WebSocket — PTY I/O relay | REST API (health + session CRUD), WebSocket bidirectional PTY I/O, ring buffer replay on connect, CORS/logging middleware, subscriber pattern for fan-out to multiple WS clients | ✅ Done (PR #4, 2026-04-09) | #1 |
-| TBD | Electron shell + xterm.js single panel | Electron main process spawns daemon, BrowserWindow loads frontend, xterm.js connects via WebSocket, basic resize handling | Planned | #2 |
-| TBD | Session persistence: close Electron, reopen, resume | Electron close → daemon keeps running (not child process kill). Electron reopen → detect running daemon → reconnect. Ring buffer replay for screen restore | Planned | Electron shell |
+| #5 | Electron shell + xterm.js single panel + session reconnect | Electron main process spawns daemon, BrowserWindow loads frontend, xterm.js connects via WebSocket, resize handling, close/reopen reconnect with ring buffer replay | In Progress | #2 |
 
 **Demo scenario after M1:**
-1. Run zplex → Electron window opens → single terminal panel (PowerShell)
+1. Run zplex → Electron window opens → single terminal panel (pwsh)
 2. Run some commands (dir, git status, etc.)
 3. Close Electron window
 4. Run zplex again → same terminal session, same output visible
@@ -391,7 +390,7 @@ zplex reads its own config file: `~/.zplex/config.toml`
 
 [daemon]
 port = 17732                     # HTTP + WebSocket port
-default_shell = "powershell"     # Default shell for new sessions
+default_shell = "pwsh"           # Default shell for new sessions
 buffer_size = 102400             # Ring buffer size per session (bytes, default 100KB)
 
 [zpit]
