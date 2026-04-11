@@ -290,6 +290,11 @@ html, body {
   min-width: 320px;
   max-width: 400px;
   font-family: inherit;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
 }
 
 #close-dialog::backdrop {
