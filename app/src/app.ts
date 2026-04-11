@@ -441,10 +441,9 @@ async function init(): Promise<void> {
     refitAllTerminals();
   });
 
-  // Register layout auto-save callback (fires on panel add/remove and gutter drag end)
-  panelGrid.onLayoutChange(() => {
-    saveLayout();
-  });
+  // NOTE: onLayoutChange callback is registered AFTER reconciliation completes
+  // to prevent intermediate saves from overwriting the daemon's saved custom
+  // grid template with auto-tiled values during mount.
 
   // Wire up the "+" button
   const addBtn = document.getElementById("add-panel-btn");
@@ -590,6 +589,18 @@ async function init(): Promise<void> {
 
   // AC-10: Refit all terminals after reconciliation
   refitAllTerminals();
+
+  // Register layout auto-save callback AFTER reconciliation is complete.
+  // During reconciliation, each addPanel() triggers rebuildGrid() which would
+  // fire this callback with auto-tiled grid template values, overwriting the
+  // daemon's saved custom template. Deferring registration prevents this.
+  panelGrid.onLayoutChange(() => {
+    saveLayout();
+  });
+
+  // Persist the final post-reconciliation layout state (with correct grid
+  // template — either restored custom values or auto-tiled) in a single save.
+  saveLayout();
 
   console.warn("[app] init exit");
 }
