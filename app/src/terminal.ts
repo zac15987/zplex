@@ -92,6 +92,15 @@ export class TerminalWrapper {
 
     this.loadWebGLAddon();
 
+    // Let Ctrl+Shift shortcuts (Arrow, PageUp/PageDown) bubble to document
+    // instead of being consumed by xterm.js.
+    this.terminal.attachCustomKeyEventHandler((e: KeyboardEvent): boolean => {
+      if (e.ctrlKey && e.shiftKey) {
+        return false; // Don't handle — let it propagate to app-level handler
+      }
+      return true; // Let xterm.js handle normally
+    });
+
     // Initial fit so cols/rows are correct before the first resize message.
     this.fitAddon.fit();
 
