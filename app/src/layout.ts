@@ -4,7 +4,7 @@
  * PanelGrid manages an auto-tiled grid of terminal panels. Given N panels
  * (1-8), it computes a 1- or 2-row grid layout and places panels using
  * explicit CSS Grid column/row assignments. Gutter elements are inserted
- * between adjacent panels to support future drag-resize (T6).
+ * between adjacent panels for drag-resize via pointer events.
  *
  * Grid structure example (5 panels = 3 top + 2 bottom):
  *   grid-template-columns: 1fr 4px 1fr 4px 1fr
@@ -69,6 +69,9 @@ export class PanelGrid {
 
   /** Row sizes — initially empty; populated by rebuildGrid. */
   private rowSizes: number[] = [];
+
+  /** Optional callback invoked after gutter drag resize or grid rebuild. */
+  private onPanelResizeCallback: (() => void) | null = null;
 
   constructor(containerElement: HTMLElement) {
     this.container = containerElement;
@@ -265,6 +268,11 @@ export class PanelGrid {
     }
   }
 
+  /** Register a callback invoked after gutter drag resizes panels. */
+  onPanelResize(callback: () => void): void {
+    this.onPanelResizeCallback = callback;
+  }
+
   /** Return the current grid configuration. */
   getGridConfig(): GridConfig {
     return { ...this.currentConfig };
@@ -454,6 +462,229 @@ export class PanelGrid {
         this.container.appendChild(panel.element);
       }
     }
+
+    this.attachGutterListeners();
+
+    if (this.onPanelResizeCallback) {
+      this.onPanelResizeCallback();
+    }
+  }
+  /**
+   * Build a CSS grid-template-columns string from panel column widths.
+   * Interleaves gutter widths (GUTTER_SIZE_PX) between panel columns.
+   */
+  private buildColumnTemplate(panelWidths: number[]): string {
+    const parts: string[] = [];
+    for (let i = 0; i < panelWidths.length; i++) {
+      if (i > 0) {
+        parts.push(`${GUTTER_SIZE_PX}px`);
+      }
+      parts.push(`${panelWidths[i]}px`);
+    }
+    return parts.join(" ");
+  }
+
+  /**
+   * Build a CSS grid-template-rows string from panel row heights.
+   * Interleaves gutter heights (GUTTER_SIZE_PX) between panel rows.
+   */
+  private buildRowTemplate(panelHeights: number[]): string {
+    const parts: string[] = [];
+    for (let i = 0; i < panelHeights.length; i++) {
+      if (i > 0) {
+        parts.push(`${GUTTER_SIZE_PX}px`);
+      }
+      parts.push(`${panelHeights[i]}px`);
+    }
+    return parts.join(" ");
+  }
+
+  /**
+   * Extract panel-only sizes from a resolved grid template string.
+   *
+   * The template alternates: panelSize gutterSize panelSize gutterSize ...
+   * So panel sizes are at even indices (0, 2, 4, ...).
+   */
+  private extractPanelSizes(templateString: string): number[] {
+    const allSizes = templateString.split(" ").map(v => parseFloat(v));
+    const panelSizes: number[] = [];
+    for (let i = 0; i < allSizes.length; i += 2) {
+      panelSizes.push(allSizes[i]);
+    }
+    return panelSizes;
+  }
+
+  /**
+   * Attach pointer-event-based drag listeners to all gutter elements.
+   * Called at the end of rebuildGrid so listeners are fresh after DOM rebuild.
+   */
+  private attachGutterListeners(): void {
+    const colGutters = this.container.querySelectorAll<HTMLElement>(".gutter-col");
+    const rowGutters = this.container.querySelectorAll<HTMLElement>(".gutter-row");
+
+    for (const gutter of colGutters) {
+      gutter.addEventListener("pointerdown", (e: PointerEvent) => {
+        this.handleColumnGutterDragStart(gutter, e);
+      });
+    }
+
+    for (const gutter of rowGutters) {
+      gutter.addEventListener("pointerdown", (e: PointerEvent) => {
+        this.handleRowGutterDragStart(gutter, e);
+      });
+    }
+  }
+
+  /**
+   * Handle pointerdown on a column gutter — begin horizontal drag resize.
+   *
+   * The gutter at data-col-index N sits between panel column N and N+1.
+   * Dragging adjusts both adjacent columns while respecting MIN_PANEL_WIDTH.
+   */
+  private handleColumnGutterDragStart(gutter: HTMLElement, startEvent: PointerEvent): void {
+    console.warn("[layout] column gutter drag start, col-index:", gutter.dataset.colIndex);
+
+    const colIndex = parseInt(gutter.dataset.colIndex ?? "0", 10);
+    gutter.setPointerCapture(startEvent.pointerId);
+    startEvent.preventDefault();
+
+    // Read resolved column widths from computed style
+    const computed = getComputedStyle(this.container);
+    const initialPanelWidths = this.extractPanelSizes(computed.gridTemplateColumns);
+    const startX = startEvent.clientX;
+
+    // Visual feedback
+    gutter.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const leftIdx = colIndex;
+    const rightIdx = colIndex + 1;
+    const initialLeft = initialPanelWidths[leftIdx];
+    const initialRight = initialPanelWidths[rightIdx];
+
+    const onPointerMove = (e: PointerEvent): void => {
+      e.preventDefault();
+      const deltaX = e.clientX - startX;
+
+      // Compute candidate sizes
+      let newLeft = initialLeft + deltaX;
+      let newRight = initialRight - deltaX;
+
+      // Clamp to minimum width
+      if (newLeft < MIN_PANEL_WIDTH) {
+        newLeft = MIN_PANEL_WIDTH;
+        newRight = initialLeft + initialRight - MIN_PANEL_WIDTH;
+      }
+      if (newRight < MIN_PANEL_WIDTH) {
+        newRight = MIN_PANEL_WIDTH;
+        newLeft = initialLeft + initialRight - MIN_PANEL_WIDTH;
+      }
+
+      // Update the sizes array
+      const updatedWidths = [...initialPanelWidths];
+      updatedWidths[leftIdx] = newLeft;
+      updatedWidths[rightIdx] = newRight;
+
+      // Apply to DOM
+      this.container.style.gridTemplateColumns = this.buildColumnTemplate(updatedWidths);
+      this.setColumnSizes(updatedWidths);
+    };
+
+    const onPointerUp = (e: PointerEvent): void => {
+      console.warn("[layout] column gutter drag end, col-index:", gutter.dataset.colIndex);
+
+      gutter.releasePointerCapture(e.pointerId);
+      gutter.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+
+      if (this.onPanelResizeCallback) {
+        this.onPanelResizeCallback();
+      }
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }
+
+  /**
+   * Handle pointerdown on a row gutter — begin vertical drag resize.
+   *
+   * The gutter at data-row-index N sits between panel row N and N+1.
+   * Dragging adjusts both adjacent rows while respecting MIN_PANEL_HEIGHT.
+   */
+  private handleRowGutterDragStart(gutter: HTMLElement, startEvent: PointerEvent): void {
+    console.warn("[layout] row gutter drag start, row-index:", gutter.dataset.rowIndex);
+
+    const rowIndex = parseInt(gutter.dataset.rowIndex ?? "0", 10);
+    gutter.setPointerCapture(startEvent.pointerId);
+    startEvent.preventDefault();
+
+    // Read resolved row heights from computed style
+    const computed = getComputedStyle(this.container);
+    const initialPanelHeights = this.extractPanelSizes(computed.gridTemplateRows);
+    const startY = startEvent.clientY;
+
+    // Visual feedback
+    gutter.classList.add("dragging");
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+
+    const topIdx = rowIndex;
+    const bottomIdx = rowIndex + 1;
+    const initialTop = initialPanelHeights[topIdx];
+    const initialBottom = initialPanelHeights[bottomIdx];
+
+    const onPointerMove = (e: PointerEvent): void => {
+      e.preventDefault();
+      const deltaY = e.clientY - startY;
+
+      // Compute candidate sizes
+      let newTop = initialTop + deltaY;
+      let newBottom = initialBottom - deltaY;
+
+      // Clamp to minimum height
+      if (newTop < MIN_PANEL_HEIGHT) {
+        newTop = MIN_PANEL_HEIGHT;
+        newBottom = initialTop + initialBottom - MIN_PANEL_HEIGHT;
+      }
+      if (newBottom < MIN_PANEL_HEIGHT) {
+        newBottom = MIN_PANEL_HEIGHT;
+        newTop = initialTop + initialBottom - MIN_PANEL_HEIGHT;
+      }
+
+      // Update the sizes array
+      const updatedHeights = [...initialPanelHeights];
+      updatedHeights[topIdx] = newTop;
+      updatedHeights[bottomIdx] = newBottom;
+
+      // Apply to DOM
+      this.container.style.gridTemplateRows = this.buildRowTemplate(updatedHeights);
+      this.setRowSizes(updatedHeights);
+    };
+
+    const onPointerUp = (e: PointerEvent): void => {
+      console.warn("[layout] row gutter drag end, row-index:", gutter.dataset.rowIndex);
+
+      gutter.releasePointerCapture(e.pointerId);
+      gutter.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+
+      if (this.onPanelResizeCallback) {
+        this.onPanelResizeCallback();
+      }
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
   }
 }
 
