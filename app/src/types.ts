@@ -171,5 +171,20 @@ export interface LayoutState {
   grid_template_rows: string;
 }
 
+// ---------------------------------------------------------------------------
+// Workspace API types (daemon/server/api.go)
+// ---------------------------------------------------------------------------
+
+/** Metadata for a single workspace. */
+export interface WorkspaceInfo {
+  /** Unique workspace identifier. */
+  id: string;
+  /** Human-readable display name (e.g. "Workspace 1"). */
+  name: string;
+}
+
+/** Response from GET /api/workspaces — list of workspace IDs with layout data. */
+export type WorkspaceListResponse = string[];
+
 // Ensure this file is treated as a module (required when using `declare global`).
 export {};
