@@ -314,6 +314,57 @@ func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Workspace endpoints
+// ---------------------------------------------------------------------------
+
+// handleListWorkspaces returns the list of workspace IDs that have layout data.
+func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handleListWorkspaces: listing workspaces")
+
+	s.layoutMu.Lock()
+	ids := make([]string, 0, len(s.layouts))
+	for id := range s.layouts {
+		ids = append(ids, id)
+	}
+	s.layoutMu.Unlock()
+
+	slog.Info("server.handleListWorkspaces: returning workspaces",
+		slog.Int("count", len(ids)),
+	)
+
+	writeJSON(w, http.StatusOK, ids)
+}
+
+// handleDeleteWorkspace removes the layout data for a specific workspace.
+func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	slog.Info("server.handleDeleteWorkspace: deleting workspace layout",
+		slog.String("workspace", id),
+	)
+
+	s.layoutMu.Lock()
+	_, exists := s.layouts[id]
+	if exists {
+		delete(s.layouts, id)
+	}
+	s.layoutMu.Unlock()
+
+	if !exists {
+		slog.Warn("server.handleDeleteWorkspace: workspace not found",
+			slog.String("workspace", id),
+		)
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	slog.Info("server.handleDeleteWorkspace: workspace layout deleted",
+		slog.String("workspace", id),
+	)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
 // JSON response helpers
 // ---------------------------------------------------------------------------
 
