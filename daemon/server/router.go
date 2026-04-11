@@ -61,6 +61,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/layout", s.handleGetLayout)
 	mux.HandleFunc("PUT /api/layout", s.handlePutLayout)
 
+	mux.HandleFunc("GET /api/workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("DELETE /api/workspaces/{id}", s.handleDeleteWorkspace)
+
 	mux.HandleFunc("GET /ws/{session_id}", s.handleWebSocket)
 
 	// Middleware chain: CORS wraps logging wraps routing.
