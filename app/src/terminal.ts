@@ -31,6 +31,8 @@ export class TerminalWrapper {
   private ws: WebSocket | null = null;
   private container: HTMLElement | null = null;
   private resizeHandler: (() => void) | null = null;
+  private onFocusCallback: ((sessionId: string) => void) | null = null;
+  private onDisposeCallback: ((sessionId: string) => void) | null = null;
 
   constructor(sessionId: string, daemonPort: number) {
     this.sessionId = sessionId;
@@ -51,10 +53,42 @@ export class TerminalWrapper {
   // Public API
   // ---------------------------------------------------------------------------
 
+  /** Register a callback invoked when the terminal receives focus (click). */
+  onFocus(callback: (sessionId: string) => void): void {
+    this.onFocusCallback = callback;
+  }
+
+  /** Register a callback invoked when the terminal is disposed. */
+  onDispose(callback: (sessionId: string) => void): void {
+    this.onDisposeCallback = callback;
+  }
+
+  /** Trigger a re-fit of the terminal to its container dimensions. */
+  fit(): void {
+    this.fitAddon.fit();
+  }
+
+  /** Programmatically focus the xterm.js terminal input. */
+  focusTerminal(): void {
+    this.terminal.focus();
+  }
+
+  /** Return current terminal dimensions (cols, rows). */
+  getDimensions(): { cols: number; rows: number } {
+    return { cols: this.terminal.cols, rows: this.terminal.rows };
+  }
+
   /** Mount the terminal into a DOM element and connect its WebSocket. */
   mount(container: HTMLElement): void {
     this.container = container;
     this.terminal.open(container);
+
+    // Click-to-focus: notify layout when this terminal is clicked.
+    container.addEventListener("mousedown", () => {
+      if (this.onFocusCallback) {
+        this.onFocusCallback(this.sessionId);
+      }
+    });
 
     this.loadWebGLAddon();
 
@@ -92,6 +126,10 @@ export class TerminalWrapper {
     }
     this.terminal.dispose();
     this.container = null;
+
+    if (this.onDisposeCallback) {
+      this.onDisposeCallback(this.sessionId);
+    }
   }
 
   /** Return the session ID this wrapper is bound to. */
