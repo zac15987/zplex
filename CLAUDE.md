@@ -56,6 +56,25 @@ Go Daemon (single binary, port 17732)
   → ring buffer (100KB default) per session for reconnect replay
 ```
 
+### Multi-Panel Layout
+
+The frontend uses an auto-tiled CSS Grid layout engine (`app/src/layout.ts`) that manages terminal panels dynamically:
+
+- **PanelGrid class** (`layout.ts`): Manages panel placement, gutter resize, and focus tracking.
+- **Auto-tile algorithm**: Panels auto-arrange in 1-2 rows. Columns = ceil(N/2). Bottom row panels span to fill width when fewer than top row.
+- **Maximum 8 panels** per workspace. Attempts to add more are silently ignored with a console warning.
+- **Workspace-scoped registry**: Sessions are organized as `Map<workspaceId, Map<sessionId, TerminalWrapper>>` in `app.ts`. Current default workspace is `"default"`.
+- **Gutter drag resize**: Panels can be resized by dragging gutter bars between them. Minimum panel size: 120px wide, 80px tall.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+N` | Create new terminal panel |
+| `Ctrl+Shift+W` | Close focused panel (shows dialog or uses saved preference) |
+| `Ctrl+Shift+Arrow` | Move focus to adjacent panel (Up/Down/Left/Right) |
+| `Shift+Click [×]` | Force close dialog (override saved preference) |
+
 ### Daemon REST API
 
 | Method | Path | Purpose |

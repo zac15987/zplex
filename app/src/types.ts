@@ -94,5 +94,60 @@ declare global {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Panel & Layout types
+// ---------------------------------------------------------------------------
+
+/** User preference for what happens when closing a panel. */
+export type ClosePreference = "detach" | "kill";
+
+/** A single panel in the CSS Grid layout. */
+export interface PanelInfo {
+  /** The daemon session ID. */
+  sessionId: string;
+  /** Display title shown in the header bar. */
+  title: string;
+  /** Which workspace this panel belongs to. */
+  workspaceId: string;
+  /** The panel's root DOM element. */
+  element: HTMLElement;
+  /** The header bar element. */
+  headerElement: HTMLElement;
+  /** The terminal content area element. */
+  contentElement: HTMLElement;
+}
+
+/** Computed grid layout dimensions. */
+export interface GridConfig {
+  /** Number of columns. */
+  columns: number;
+  /** Number of rows (1 or 2). */
+  rows: number;
+  /** Number of panels in the top row. */
+  topRowCount: number;
+  /** Number of panels in the bottom row. */
+  bottomRowCount: number;
+}
+
+/** Runtime state for a single workspace. */
+export interface WorkspaceState {
+  /** Maps session ID to PanelInfo. */
+  panels: Map<string, PanelInfo>;
+  /** Currently focused panel's session ID, or null if none. */
+  focusedPanelId: string | null;
+  /** Current column sizes in pixels (for drag resize). */
+  columnSizes: number[];
+  /** Current row sizes in pixels (for drag resize). */
+  rowSizes: number[];
+}
+
+/** Return value from the close-panel confirmation dialog. */
+export interface CloseDialogResult {
+  /** Which action was chosen. */
+  action: ClosePreference;
+  /** Whether to save the preference for future closes. */
+  remember: boolean;
+}
+
 // Ensure this file is treated as a module (required when using `declare global`).
 export {};
