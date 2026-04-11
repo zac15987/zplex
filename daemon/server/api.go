@@ -11,6 +11,24 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Layout state types
+// ---------------------------------------------------------------------------
+
+// panelLayout represents a single panel's position in the saved layout.
+type panelLayout struct {
+	SessionID string `json:"session_id"`
+	Position  int    `json:"position"`
+}
+
+// layoutState represents the complete layout configuration.
+// Stored in-memory on the Server struct — not persisted to disk.
+type layoutState struct {
+	Panels              []panelLayout `json:"panels"`
+	GridTemplateColumns string        `json:"grid_template_columns"`
+	GridTemplateRows    string        `json:"grid_template_rows"`
+}
+
+// ---------------------------------------------------------------------------
 // Health endpoint
 // ---------------------------------------------------------------------------
 
@@ -219,6 +237,60 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusOK, sess.Info())
+}
+
+// ---------------------------------------------------------------------------
+// Layout endpoints
+// ---------------------------------------------------------------------------
+
+// handleGetLayout returns the current layout state.
+// Returns HTTP 200 with empty state if no layout has been saved.
+func (s *Server) handleGetLayout(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handleGetLayout: retrieving layout")
+
+	s.layoutMu.Lock()
+	state := s.layout
+	s.layoutMu.Unlock()
+
+	// Ensure panels is never null in JSON output
+	if state.Panels == nil {
+		state.Panels = []panelLayout{}
+	}
+
+	slog.Info("server.handleGetLayout: layout retrieved",
+		slog.Int("panels", len(state.Panels)),
+	)
+
+	writeJSON(w, http.StatusOK, state)
+}
+
+// handlePutLayout saves a new layout state, replacing any previous state.
+func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handlePutLayout: processing layout save")
+
+	var state layoutState
+	if err := json.NewDecoder(r.Body).Decode(&state); err != nil {
+		slog.Warn("server.handlePutLayout: invalid request body",
+			slog.String("error", err.Error()),
+		)
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Ensure panels is never nil
+	if state.Panels == nil {
+		state.Panels = []panelLayout{}
+	}
+
+	s.layoutMu.Lock()
+	s.layout = state
+	s.layoutMu.Unlock()
+
+	slog.Info("server.handlePutLayout: layout saved",
+		slog.Int("panels", len(state.Panels)),
+	)
+
+	writeJSON(w, http.StatusOK, state)
 }
 
 // ---------------------------------------------------------------------------

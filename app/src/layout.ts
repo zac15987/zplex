@@ -13,7 +13,7 @@
  *   Bottom row panels span proportionally across all 5 CSS columns at row 3.
  */
 
-import type { PanelInfo, GridConfig } from "./types";
+import type { PanelInfo, GridConfig, LayoutState, PanelLayout } from "./types";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -72,6 +72,9 @@ export class PanelGrid {
 
   /** Optional callback invoked after gutter drag resize or grid rebuild. */
   private onPanelResizeCallback: (() => void) | null = null;
+
+  /** Optional callback invoked when layout should be saved (panel add/remove, gutter drag end). */
+  private onLayoutChangeCallback: (() => void) | null = null;
 
   constructor(containerElement: HTMLElement) {
     this.container = containerElement;
@@ -132,6 +135,10 @@ export class PanelGrid {
     this.panelMap.set(sessionId, panelInfo);
     this.rebuildGrid();
 
+    if (this.onLayoutChangeCallback) {
+      this.onLayoutChangeCallback();
+    }
+
     console.warn("[layout] addPanel exit:", sessionId);
     return panelInfo;
   }
@@ -163,6 +170,10 @@ export class PanelGrid {
     }
 
     this.rebuildGrid();
+
+    if (this.onLayoutChangeCallback) {
+      this.onLayoutChangeCallback();
+    }
 
     console.warn("[layout] removePanel exit:", sessionId);
   }
@@ -271,6 +282,31 @@ export class PanelGrid {
   /** Register a callback invoked after gutter drag resizes panels. */
   onPanelResize(callback: () => void): void {
     this.onPanelResizeCallback = callback;
+  }
+
+  /** Register a callback invoked when layout changes (panel add/remove, gutter drag end). */
+  onLayoutChange(callback: () => void): void {
+    this.onLayoutChangeCallback = callback;
+  }
+
+  /** Serialize the current layout state for persistence via PUT /api/layout. */
+  serializeLayout(): LayoutState {
+    const panels: PanelLayout[] = this.panelOrder.map((sessionId, index) => ({
+      session_id: sessionId,
+      position: index,
+    }));
+
+    return {
+      panels,
+      grid_template_columns: this.container.style.gridTemplateColumns,
+      grid_template_rows: this.container.style.gridTemplateRows,
+    };
+  }
+
+  /** Apply saved grid template values from a persisted layout state. */
+  applyLayoutTemplate(gridTemplateColumns: string, gridTemplateRows: string): void {
+    this.container.style.gridTemplateColumns = gridTemplateColumns;
+    this.container.style.gridTemplateRows = gridTemplateRows;
   }
 
   /** Return the current grid configuration. */
@@ -605,6 +641,10 @@ export class PanelGrid {
       if (this.onPanelResizeCallback) {
         this.onPanelResizeCallback();
       }
+
+      if (this.onLayoutChangeCallback) {
+        this.onLayoutChangeCallback();
+      }
     };
 
     document.addEventListener("pointermove", onPointerMove);
@@ -680,6 +720,10 @@ export class PanelGrid {
 
       if (this.onPanelResizeCallback) {
         this.onPanelResizeCallback();
+      }
+
+      if (this.onLayoutChangeCallback) {
+        this.onLayoutChangeCallback();
       }
     };
 

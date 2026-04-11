@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/zac15987/zplex/daemon/session"
@@ -28,6 +29,8 @@ type Server struct {
 	mgr       *session.SessionManager
 	startTime time.Time
 	version   string
+	layoutMu  sync.Mutex
+	layout    layoutState
 }
 
 // NewServer creates a Server wired to the given session manager. The returned
@@ -53,6 +56,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.handlePatchSession)
+
+	mux.HandleFunc("GET /api/layout", s.handleGetLayout)
+	mux.HandleFunc("PUT /api/layout", s.handlePutLayout)
 
 	mux.HandleFunc("GET /ws/{session_id}", s.handleWebSocket)
 
