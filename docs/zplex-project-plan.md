@@ -1,7 +1,7 @@
 # zplex — Project Plan
 
-> Version: 1.1
-> Date: 2026-04-10
+> Version: 1.2
+> Date: 2026-04-11
 > Author: Jeff (zac) + Claude
 > Repo: github.com/zac15987/zplex
 > License: MIT
@@ -205,9 +205,9 @@ zplex/
 
 ## 5. Milestones
 
-> **Progress (2026-04-10):** Issues #1 and #2 complete — the entire Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay). Next step: Electron shell + xterm.js frontend.
+> **Progress (2026-04-11):** M1 complete — all three issues (#1, #2, #5) are merged and closed. The Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay) and the Electron shell with xterm.js frontend is working (single panel, session reconnect). Next step: M2 — multi-panel layout with CSS Grid.
 >
-> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. Remaining issues use TBD as they haven't been filed on GitHub yet.
+> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. Issue #5 was delivered via PR #6. Remaining issues use TBD as they haven't been filed on GitHub yet.
 
 ### M1: Skeleton — single terminal works end-to-end
 
@@ -217,7 +217,7 @@ zplex/
 |---|---|---|---|---|
 | #1 | Go daemon: Session layer + PTY management | Config (4-layer priority: defaults < TOML < env < CLI flags), Session struct (PTY + ring buffer), SessionManager CRUD, ConPTY support (Windows EOF fix via `sync.Once`), graceful shutdown | ✅ Done (PR #3, 2026-04-08) | — |
 | #2 | HTTP Server + WebSocket — PTY I/O relay | REST API (health + session CRUD), WebSocket bidirectional PTY I/O, ring buffer replay on connect, CORS/logging middleware, subscriber pattern for fan-out to multiple WS clients | ✅ Done (PR #4, 2026-04-09) | #1 |
-| #5 | Electron shell + xterm.js single panel + session reconnect | Electron main process spawns daemon, BrowserWindow loads frontend, xterm.js connects via WebSocket, resize handling, close/reopen reconnect with ring buffer replay | In Progress | #2 |
+| #5 | Electron shell + xterm.js single panel + session reconnect | Electron main process spawns daemon, BrowserWindow loads frontend, xterm.js connects via WebSocket, resize handling, close/reopen reconnect with ring buffer replay | ✅ Done (PR #6, 2026-04-10) | #2 |
 
 **Demo scenario after M1:**
 1. Run zplex → Electron window opens → single terminal panel (pwsh)
@@ -405,7 +405,7 @@ start_daemon = true              # Auto-start daemon on app launch
 
 [appearance]
 theme = "dark"                   # dark | light (future)
-font_family = "Cascadia Code"   # Terminal font
+font_family = "Cascadia Mono NF" # Terminal font (Nerd Font for glyph support)
 font_size = 14                   # Terminal font size
 ```
 
