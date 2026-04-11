@@ -6,6 +6,10 @@
 .claude/settings.local.json
 .mcp.json
 
+# Go daemon
+daemon/*.exe
+daemon/*.dll
+
 # Electron app
 app/node_modules/
 app/dist/
