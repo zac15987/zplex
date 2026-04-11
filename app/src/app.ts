@@ -219,7 +219,7 @@ function refitAllTerminals(): void {
  * Show the close confirmation dialog and return the user's choice.
  * Returns null if cancelled.
  */
-function showCloseDialog(): Promise<CloseDialogResult | null> {
+function showCloseDialog(savedPreference?: ClosePreference): Promise<CloseDialogResult | null> {
   return new Promise<CloseDialogResult | null>((resolve) => {
     const dialog = document.getElementById("close-dialog") as HTMLDialogElement | null;
     if (!dialog) {
@@ -235,7 +235,12 @@ function showCloseDialog(): Promise<CloseDialogResult | null> {
     const cancelBtn = document.getElementById("close-cancel");
     const confirmBtn = document.getElementById("close-confirm");
 
-    if (detachRadio) detachRadio.checked = true;
+    // Pre-select saved preference if available (for Shift+click override)
+    if (savedPreference === "kill" && killRadio) {
+      killRadio.checked = true;
+    } else if (detachRadio) {
+      detachRadio.checked = true;
+    }
     if (rememberCheckbox) rememberCheckbox.checked = false;
 
     // Clean up function to remove listeners
@@ -320,17 +325,18 @@ async function executeClose(sessionId: string, action: ClosePreference): Promise
 async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<void> {
   console.warn("[app] closePanelFlow entry:", sessionId, "forceDialog:", forceDialog);
 
-  // Check for saved preference (AC-9)
-  if (!forceDialog) {
-    const saved = localStorage.getItem(CLOSE_PREFERENCE_KEY) as ClosePreference | null;
-    if (saved === "detach" || saved === "kill") {
-      await executeClose(sessionId, saved);
-      return;
-    }
+  // Read saved preference once for both skip-dialog and pre-select paths
+  const saved = localStorage.getItem(CLOSE_PREFERENCE_KEY) as ClosePreference | null;
+  const validSaved = (saved === "detach" || saved === "kill") ? saved : undefined;
+
+  // Use saved preference directly if not forcing dialog (AC-9)
+  if (!forceDialog && validSaved) {
+    await executeClose(sessionId, validSaved);
+    return;
   }
 
-  // Show dialog (AC-8)
-  const result = await showCloseDialog();
+  // Show dialog, pre-selecting saved preference if available (AC-10)
+  const result = await showCloseDialog(validSaved);
   if (!result) {
     // User cancelled
     console.warn("[app] closePanelFlow cancelled by user");
