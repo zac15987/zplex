@@ -30,7 +30,7 @@ export class TerminalWrapper {
   private readonly fitAddon: FitAddon;
   private ws: WebSocket | null = null;
   private container: HTMLElement | null = null;
-  private resizeHandler: (() => void) | null = null;
+  private resizeObserver: ResizeObserver | null = null;
   private onFocusCallback: ((sessionId: string) => void) | null = null;
   private onDisposeCallback: ((sessionId: string) => void) | null = null;
 
@@ -100,11 +100,13 @@ export class TerminalWrapper {
       this.send({ type: "input", data });
     });
 
-    // Recalculate dimensions when the browser window resizes.
-    this.resizeHandler = () => {
+    // Observe container size changes for automatic re-fit (AC-12).
+    // ResizeObserver fires after layout settles, covering window resize,
+    // CSS Grid reflow (panel add/remove), and gutter drag resize.
+    this.resizeObserver = new ResizeObserver(() => {
       this.fitAddon.fit();
-    };
-    window.addEventListener("resize", this.resizeHandler);
+    });
+    this.resizeObserver.observe(container);
 
     // After fit recalculates, forward the new size to the daemon.
     this.terminal.onResize(({ cols, rows }) => {
@@ -116,9 +118,9 @@ export class TerminalWrapper {
 
   /** Tear down the terminal, close the WebSocket, and remove event listeners. */
   dispose(): void {
-    if (this.resizeHandler) {
-      window.removeEventListener("resize", this.resizeHandler);
-      this.resizeHandler = null;
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
     if (this.ws) {
       this.ws.close();
