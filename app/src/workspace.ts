@@ -49,7 +49,7 @@ export class WorkspaceManager {
   /** Currently active workspace ID. */
   private activeId: string = "";
 
-  /** Counter for auto-naming. */
+  /** Counter for auto-naming (used for IDs only). */
   private nextNumber: number = 1;
 
   /** Callbacks. */
@@ -100,6 +100,14 @@ export class WorkspaceManager {
   // -------------------------------------------------------------------------
   // Public API
   // -------------------------------------------------------------------------
+
+  /** Return the next available "Workspace N" name that doesn't collide with existing ones. */
+  private nextWorkspaceName(): string {
+    const names = new Set(this.workspaces.map((w) => w.name));
+    let n = 1;
+    while (names.has(`Workspace ${n}`)) n++;
+    return `Workspace ${n}`;
+  }
 
   /** Get the active workspace ID. */
   getActiveId(): string {
@@ -176,10 +184,9 @@ export class WorkspaceManager {
       return null;
     }
 
-    const num = this.nextNumber;
+    const id = `workspace-${this.nextNumber}`;
     this.nextNumber++;
-    const id = `workspace-${num}`;
-    const name = `Workspace ${num}`;
+    const name = this.nextWorkspaceName();
 
     const workspace = this.addWorkspaceInternal(id, name);
 
@@ -274,15 +281,17 @@ export class WorkspaceManager {
     }
 
     // Remove workspace from list
+    const wasActive = this.activeId === workspaceId;
     this.workspaces.splice(idx, 1);
 
-    // If we closed the active workspace, switch to an adjacent one
-    if (this.activeId === workspaceId) {
+    // If we closed the active workspace, switchTo fires onSwitchCallback
+    // so the target workspace's panels get recreated from daemon data.
+    if (wasActive) {
       const newIdx = Math.min(idx, this.workspaces.length - 1);
-      this.setActive(this.workspaces[newIdx].id);
+      this.switchTo(this.workspaces[newIdx].id);
+    } else {
+      this.renderTabs();
     }
-
-    this.renderTabs();
 
     console.warn("[workspace] closeWorkspace exit:", workspaceId);
   }

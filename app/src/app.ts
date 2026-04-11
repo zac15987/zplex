@@ -33,7 +33,8 @@ const DEFAULT_DAEMON_PORT = 17732;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const DEFAULT_WORKSPACE_ID = "default";
-const CLOSE_PREFERENCE_KEY = "zplex:closePreference";
+const PANEL_CLOSE_PREF_KEY = "zplex:panelClosePreference";
+const WORKSPACE_CLOSE_PREF_KEY = "zplex:workspaceClosePreference";
 
 // ---------------------------------------------------------------------------
 // Workspace-scoped session registry
@@ -381,7 +382,7 @@ async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<
   console.warn("[app] closePanelFlow entry:", sessionId, "forceDialog:", forceDialog);
 
   // Read saved preference once for both skip-dialog and pre-select paths
-  const saved = localStorage.getItem(CLOSE_PREFERENCE_KEY) as ClosePreference | null;
+  const saved = localStorage.getItem(PANEL_CLOSE_PREF_KEY) as ClosePreference | null;
   const validSaved = (saved === "detach" || saved === "kill") ? saved : undefined;
 
   // Use saved preference directly if not forcing dialog (AC-9)
@@ -400,7 +401,7 @@ async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<
 
   // Save preference if requested (AC-9)
   if (result.remember) {
-    localStorage.setItem(CLOSE_PREFERENCE_KEY, result.action);
+    localStorage.setItem(PANEL_CLOSE_PREF_KEY, result.action);
     console.warn("[app] close preference saved:", result.action);
   }
 
@@ -447,12 +448,16 @@ async function handleWorkspaceSwitch(fromId: string, toId: string): Promise<void
 
   if (!panelGrid) return;
 
-  // 1. Dispose all xterm.js instances in the current workspace
-  const fromRegistry = getWorkspaceRegistry(fromId);
-  for (const [, wrapper] of fromRegistry) {
-    wrapper.dispose();
+  // 1. Dispose all xterm.js instances in the previous workspace (if any remain).
+  // Use workspaces.get (not getWorkspaceRegistry) to avoid re-creating an entry
+  // for a workspace that was already cleaned up by handleWorkspaceClose.
+  const fromRegistry = workspaces.get(fromId);
+  if (fromRegistry) {
+    for (const [, wrapper] of fromRegistry) {
+      wrapper.dispose();
+    }
+    fromRegistry.clear();
   }
-  fromRegistry.clear();
 
   // 2. Clear the grid (remove all panel DOM elements)
   panelGrid.disposeAllPanels();
@@ -508,18 +513,22 @@ async function handleWorkspaceSwitch(fromId: string, toId: string): Promise<void
 async function handleWorkspaceClose(workspaceId: string): Promise<void> {
   console.warn("[app] handleWorkspaceClose entry:", workspaceId);
 
-  const registry = getWorkspaceRegistry(workspaceId);
   const runningSessions: string[] = [];
 
-  // Check which sessions in this workspace are still running
+  // Check which sessions in this workspace are still running.
+  // Use daemon layout API instead of in-memory registry, because the registry
+  // is cleared when switching away from a workspace (dispose/recreate).
   try {
+    const layoutState = await apiGet<LayoutState>(
+      `/api/layout?workspace=${encodeURIComponent(workspaceId)}`,
+    );
     const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
     const runningIds = new Set(
       sessionList.filter((s) => s.status === "running").map((s) => s.id),
     );
-    for (const sessionId of registry.keys()) {
-      if (runningIds.has(sessionId)) {
-        runningSessions.push(sessionId);
+    for (const panel of layoutState.panels) {
+      if (runningIds.has(panel.session_id)) {
+        runningSessions.push(panel.session_id);
       }
     }
   } catch (err: unknown) {
@@ -528,7 +537,7 @@ async function handleWorkspaceClose(workspaceId: string): Promise<void> {
 
   // If there are running sessions, show close dialog
   if (runningSessions.length > 0) {
-    const saved = localStorage.getItem(CLOSE_PREFERENCE_KEY) as ClosePreference | null;
+    const saved = localStorage.getItem(WORKSPACE_CLOSE_PREF_KEY) as ClosePreference | null;
     const validSaved = (saved === "detach" || saved === "kill") ? saved : undefined;
 
     let action: ClosePreference = "detach";
@@ -556,7 +565,7 @@ async function handleWorkspaceClose(workspaceId: string): Promise<void> {
       }
 
       if (result.remember) {
-        localStorage.setItem(CLOSE_PREFERENCE_KEY, result.action);
+        localStorage.setItem(WORKSPACE_CLOSE_PREF_KEY, result.action);
       }
       action = result.action;
     }
@@ -573,11 +582,14 @@ async function handleWorkspaceClose(workspaceId: string): Promise<void> {
     }
   }
 
-  // Dispose all xterm.js instances in this workspace
-  for (const [, wrapper] of registry) {
-    wrapper.dispose();
+  // Dispose all xterm.js instances in this workspace (if any are still mounted)
+  const registry = workspaces.get(workspaceId);
+  if (registry) {
+    for (const [, wrapper] of registry) {
+      wrapper.dispose();
+    }
+    registry.clear();
   }
-  registry.clear();
   workspaces.delete(workspaceId);
 
   // If this was the active workspace, clear the grid
