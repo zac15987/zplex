@@ -1,6 +1,14 @@
 :root {
   --bg-color: #1e1e1e;
   --text-color: #d4d4d4;
+  --panel-border-color: #333;
+  --panel-focus-border-color: #007acc;
+  --header-height: 24px;
+  --header-bg: #252526;
+  --header-text: #cccccc;
+  --gutter-size: 4px;
+  --gutter-color: #333;
+  --gutter-hover-color: #007acc;
 }
 
 * {
@@ -18,8 +26,209 @@ html, body {
   font-family: 'Cascadia Mono NF', 'Cascadia Code', 'Consolas', monospace;
 }
 
-#terminal-container {
+/* --- Grid Container --- */
+
+#grid-container {
+  display: grid;
   width: 100vw;
   height: 100vh;
-  padding: 0;
+  gap: 0;
+  background-color: var(--bg-color);
+  overflow: hidden;
+}
+
+/* --- Panel --- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--panel-border-color);
+  min-width: 120px;
+  min-height: 80px;
+  position: relative;
+}
+
+.panel.focused {
+  border-color: var(--panel-focus-border-color);
+}
+
+/* --- Panel Header --- */
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-height);
+  min-height: var(--header-height);
+  max-height: var(--header-height);
+  background-color: var(--header-bg);
+  color: var(--header-text);
+  padding: 0 8px;
+  font-size: 12px;
+  user-select: none;
+  cursor: default;
+}
+
+.panel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.panel-close-btn {
+  background: none;
+  border: none;
+  color: var(--header-text);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  opacity: 0.7;
+}
+
+.panel-close-btn:hover {
+  opacity: 1;
+  color: #e06c75;
+}
+
+/* --- Panel Content (terminal area) --- */
+
+.panel-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* --- Gutters --- */
+
+.gutter-col {
+  width: var(--gutter-size);
+  cursor: col-resize;
+  background-color: var(--gutter-color);
+}
+
+.gutter-col:hover {
+  background-color: var(--gutter-hover-color);
+}
+
+.gutter-row {
+  height: var(--gutter-size);
+  cursor: row-resize;
+  background-color: var(--gutter-color);
+}
+
+.gutter-row:hover {
+  background-color: var(--gutter-hover-color);
+}
+
+.gutter-col.dragging,
+.gutter-row.dragging {
+  background-color: var(--gutter-hover-color);
+}
+
+/* --- Add Panel Button --- */
+
+#add-panel-btn {
+  position: fixed;
+  bottom: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  background: var(--header-bg);
+  border: 1px solid var(--panel-border-color);
+  color: var(--header-text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#add-panel-btn:hover {
+  border-color: var(--panel-focus-border-color);
+  color: #fff;
+}
+
+/* --- Close Dialog --- */
+
+#close-dialog {
+  background: #2d2d2d;
+  color: var(--text-color);
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 16px;
+  min-width: 320px;
+  max-width: 400px;
+  font-family: inherit;
+}
+
+#close-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.dialog-title {
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+
+.dialog-options {
+  margin-bottom: 12px;
+}
+
+.dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.dialog-option label {
+  cursor: pointer;
+}
+
+.dialog-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid #444;
+  margin-top: 4px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dialog-btn {
+  padding: 4px 16px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  background: #3c3c3c;
+  color: var(--text-color);
+}
+
+.dialog-btn:hover {
+  background: #4c4c4c;
+}
+
+.dialog-btn-primary {
+  background: #007acc;
+  border-color: #007acc;
+  color: #fff;
+}
+
+.dialog-btn-primary:hover {
+  background: #0098ff;
 }
