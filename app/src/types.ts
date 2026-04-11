@@ -149,5 +149,27 @@ export interface CloseDialogResult {
   remember: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Layout persistence API types (daemon/server/api.go)
+// ---------------------------------------------------------------------------
+
+/** A single panel's position in the saved layout. */
+export interface PanelLayout {
+  /** The daemon session ID. */
+  session_id: string;
+  /** Zero-based position index in the grid. */
+  position: number;
+}
+
+/** Layout state saved to/loaded from the daemon via GET/PUT /api/layout. */
+export interface LayoutState {
+  /** Ordered list of panels with their positions. */
+  panels: PanelLayout[];
+  /** CSS grid-template-columns value (e.g. "1fr 6px 1fr"). */
+  grid_template_columns: string;
+  /** CSS grid-template-rows value (e.g. "1fr"). */
+  grid_template_rows: string;
+}
+
 // Ensure this file is treated as a module (required when using `declare global`).
 export {};
