@@ -20,7 +20,7 @@ const THEME = {
   cursor: "#d4d4d4",
 } as const;
 
-const FONT_FAMILY = "'Cascadia Code', 'Consolas', monospace";
+const FONT_FAMILY = "'Cascadia Mono NF', 'Cascadia Code', 'Consolas', monospace";
 const FONT_SIZE = 14;
 
 export class TerminalWrapper {

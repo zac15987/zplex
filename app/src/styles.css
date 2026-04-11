@@ -15,7 +15,7 @@ html, body {
   overflow: hidden;
   background-color: var(--bg-color);
   color: var(--text-color);
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: 'Cascadia Mono NF', 'Cascadia Code', 'Consolas', monospace;
 }
 
 #terminal-container {

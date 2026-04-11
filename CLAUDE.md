@@ -101,3 +101,7 @@ zplex config lives at `~/.zplex/config.toml`. Key sections: `[daemon]` (port, de
 ## zpit Integration
 
 zplex is tightly coupled with zpit. In M4+, zpit's `LaunchClaude()` detects a running zplex daemon and POSTs to its API to create agent panels instead of opening new terminal tabs. Sessions carry metadata: `source`, `project_id`, `issue_id`, `role` (coder/reviewer).
+
+## Interaction Rules
+
+- **Do NOT modify code unless explicitly asked.** When the user asks a question, answer it — do not edit files. Wait for clear instruction (e.g., "fix it", "change it", "update it") before making changes.
