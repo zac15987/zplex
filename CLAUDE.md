@@ -47,7 +47,7 @@ Electron (main.ts)
 Frontend (TypeScript + xterm.js)
   → one xterm.js instance per panel
   → each connects via WebSocket to /ws/{session_id}
-  → layout managed by CSS Grid
+  → layout managed by CSS Grid + workspace tabs
 
 Go Daemon (single binary, port 17732)
   → REST API: session CRUD, health, layout state
@@ -66,13 +66,27 @@ The frontend uses an auto-tiled CSS Grid layout engine (`app/src/layout.ts`) tha
 - **Workspace-scoped registry**: Sessions are organized as `Map<workspaceId, Map<sessionId, TerminalWrapper>>` in `app.ts`. Current default workspace is `"default"`.
 - **Gutter drag resize**: Panels can be resized by dragging gutter bars between them. Minimum panel size: 120px wide, 80px tall.
 
+### Workspace Tabs
+
+The frontend supports multiple workspaces, each with its own set of terminal panels:
+
+- **WorkspaceManager** (`workspace.ts`): Manages workspace lifecycle — create, switch, close, rename. Renders the tab bar UI. Fires callbacks that `app.ts` handles for terminal dispose/recreate.
+- **Dispose/Recreate mechanism**: When switching workspaces, all xterm.js instances in the current workspace are disposed (freeing memory + WebGL contexts). The target workspace's panels are recreated from daemon layout data, with ring buffer replay providing near-instant recovery.
+- **Maximum 8 workspaces**. Attempts to add more are ignored with a console warning.
+- **Auto-naming**: New workspaces are named "Workspace N" (N auto-increments). Double-click tab to rename.
+- **Active workspace persistence**: Current workspace ID stored in `localStorage` key `zplex:activeWorkspace`. Restored on app restart.
+- **Close workspace**: Shows confirmation dialog if workspace has running sessions (shares `zplex:closePreference` with panel close). Last workspace cannot be closed.
+
 ### Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+Shift+N` | Create new terminal panel |
+| `Ctrl+Shift+T` | Create new workspace tab |
 | `Ctrl+Shift+W` | Close focused panel (shows dialog or uses saved preference) |
 | `Ctrl+Shift+Arrow` | Move focus to adjacent panel (Up/Down/Left/Right) |
+| `Ctrl+Shift+PageUp` | Switch to previous workspace (wraps around) |
+| `Ctrl+Shift+PageDown` | Switch to next workspace (wraps around) |
 | `Shift+Click [×]` | Force close dialog (override saved preference) |
 
 ### Daemon REST API
@@ -82,7 +96,9 @@ The frontend uses an auto-tiled CSS Grid layout engine (`app/src/layout.ts`) tha
 | GET | `/api/health` | Health check + version |
 | GET/POST | `/api/sessions` | List / create sessions |
 | GET/DELETE/PATCH | `/api/sessions/{id}` | Get / kill / update session |
-| GET/PUT | `/api/layout` | Get / save panel layout |
+| GET/PUT | `/api/layout` | Get / save panel layout (per workspace) |
+| GET | `/api/workspaces` | List workspace IDs with layout data |
+| DELETE | `/api/workspaces/{id}` | Delete workspace layout data |
 | GET | `/api/events` | SSE stream for real-time updates |
 
 ### WebSocket Protocol (`/ws/{session_id}`)

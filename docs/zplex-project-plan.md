@@ -184,6 +184,7 @@ zplex/
 │       ├── app.ts              # App init, session management, event handling
 │       ├── terminal.ts         # xterm.js wrapper: create, connect, reconnect
 │       ├── layout.ts           # Panel grid: add/remove/resize panels
+│       ├── workspace.ts        # Workspace tab bar: create/switch/close/rename workspaces
 │       ├── styles.css          # CSS Grid layout + dark theme
 │       └── types.ts            # Shared TypeScript types
 │
@@ -205,7 +206,7 @@ zplex/
 
 ## 5. Milestones
 
-> **Progress (2026-04-11):** M1 complete — all three issues (#1, #2, #5) are merged and closed. The Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay) and the Electron shell with xterm.js frontend is working (single panel, session reconnect). Next step: M2 — multi-panel layout with CSS Grid.
+> **Progress (2026-04-11):** M1 complete — all three issues (#1, #2, #5) are merged and closed. The Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay) and the Electron shell with xterm.js frontend is working (single panel, session reconnect). M2 in progress — #11 (workspace tab bar + dispose/recreate switching) is done; remaining M2 issues (multi-panel layout, panel resize, layout persistence) are planned.
 >
 > Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. Issue #5 was delivered via PR #6. Remaining issues use TBD as they haven't been filed on GitHub yet.
 
@@ -236,6 +237,7 @@ zplex/
 | TBD | Frontend: multi-panel layout with CSS Grid | Add panel (button + keyboard shortcut), remove panel, CSS Grid dynamic columns/rows, each panel is an xterm.js instance connected to a separate daemon session | Planned | M1 |
 | TBD | Panel resize + keyboard navigation | Drag-to-resize panel borders, keyboard shortcuts (Ctrl+Shift+Arrow to navigate, Ctrl+Shift+N to new panel), focus indicator (highlighted border) | Planned | multi-panel |
 | TBD | Layout persistence | Save panel layout + session mapping to daemon (GET/PUT /api/layout). On reconnect, restore exact panel arrangement | Planned | panel resize |
+| #11 | Workspace tab bar + dispose/recreate switching | Tab bar UI, WorkspaceManager, dispose/recreate xterm.js on workspace switch, workspace CRUD API, layout per workspace | ✅ Done | layout persistence |
 
 **Demo scenario after M2:**
 1. Open zplex → one panel
@@ -315,6 +317,7 @@ zpit (running inside zplex's fixed panel)
 | TBD | Electron: auto-start daemon lifecycle | On app launch: check if daemon already running → connect. If not → spawn daemon. On app "Quit" (not close): offer to stop daemon or keep running | Planned | system tray |
 | TBD | electron-builder: Windows installer (.exe) | Build script: compile Go daemon for Windows amd64, bundle with Electron, produce NSIS installer. Include desktop shortcut and start menu entry | Planned | daemon lifecycle |
 | TBD | UX polish: theme, fonts, welcome screen | Dark theme matching zpit aesthetic. Monospace font selection. Welcome screen when no sessions exist (instructions + quick-start button) | Planned | installer |
+| TBD | Settings page | User preferences UI: theme selection, font configuration, keyboard shortcut customization, workspace defaults | Planned | system tray |
 
 ---
 

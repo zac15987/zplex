@@ -29,8 +29,8 @@ type Server struct {
 	mgr       *session.SessionManager
 	startTime time.Time
 	version   string
-	layoutMu  sync.Mutex
-	layout    layoutState
+	layoutMu sync.Mutex
+	layouts  map[string]layoutState // key = workspace ID
 }
 
 // NewServer creates a Server wired to the given session manager. The returned
@@ -42,6 +42,7 @@ func NewServer(mgr *session.SessionManager) *Server {
 		mgr:       mgr,
 		startTime: time.Now(),
 		version:   "0.1.0",
+		layouts:   make(map[string]layoutState),
 	}
 }
 
@@ -59,6 +60,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/layout", s.handleGetLayout)
 	mux.HandleFunc("PUT /api/layout", s.handlePutLayout)
+
+	mux.HandleFunc("GET /api/workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("DELETE /api/workspaces/{id}", s.handleDeleteWorkspace)
 
 	mux.HandleFunc("GET /ws/{session_id}", s.handleWebSocket)
 

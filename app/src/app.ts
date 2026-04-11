@@ -13,6 +13,7 @@
 
 import { TerminalWrapper } from "./terminal";
 import { PanelGrid } from "./layout";
+import { WorkspaceManager } from "./workspace";
 import type {
   SessionInfo,
   CreateSessionRequest,
@@ -20,6 +21,8 @@ import type {
   ClosePreference,
   CloseDialogResult,
   LayoutState,
+  WorkspaceInfo,
+  WorkspaceListResponse,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +57,12 @@ function getWorkspaceRegistry(workspaceId: string): Map<string, TerminalWrapper>
 // ---------------------------------------------------------------------------
 
 let panelGrid: PanelGrid | null = null;
+let wsManager: WorkspaceManager | null = null;
+
+/** Return the active workspace ID, falling back to DEFAULT_WORKSPACE_ID. */
+function activeWorkspaceId(): string {
+  return wsManager?.getActiveId() ?? DEFAULT_WORKSPACE_ID;
+}
 
 // ---------------------------------------------------------------------------
 // Daemon communication helpers
@@ -121,14 +130,15 @@ async function apiPut<TReq>(path: string, body: TReq): Promise<void> {
  * Called automatically on panel add/remove and gutter drag end.
  */
 function saveLayout(): void {
-  if (!panelGrid) {
+  if (!panelGrid || !wsManager) {
     return;
   }
 
+  const workspaceId = wsManager.getActiveId();
   const state: LayoutState = panelGrid.serializeLayout();
-  console.warn("[app] saveLayout: saving", state.panels.length, "panels");
+  console.warn("[app] saveLayout: saving", state.panels.length, "panels for workspace:", workspaceId);
 
-  apiPut("/api/layout", state).catch((err: unknown) => {
+  apiPut(`/api/layout?workspace=${encodeURIComponent(workspaceId)}`, state).catch((err: unknown) => {
     console.error("[app] saveLayout: failed to save layout:", err);
   });
 }
@@ -179,7 +189,8 @@ function mountSessionToGrid(sessionId: string, title: string): void {
     return;
   }
 
-  const panelInfo = panelGrid.addPanel(sessionId, title, DEFAULT_WORKSPACE_ID);
+  const currentWorkspace = activeWorkspaceId();
+  const panelInfo = panelGrid.addPanel(sessionId, title, currentWorkspace);
   if (!panelInfo) {
     // Max panels reached
     return;
@@ -195,7 +206,7 @@ function mountSessionToGrid(sessionId: string, title: string): void {
   });
 
   // Register in workspace registry
-  const registry = getWorkspaceRegistry(DEFAULT_WORKSPACE_ID);
+  const registry = getWorkspaceRegistry(currentWorkspace);
   registry.set(sessionId, wrapper);
 
   // Mount xterm into the panel's content area
@@ -322,7 +333,8 @@ async function executeClose(sessionId: string, action: ClosePreference): Promise
   }
 
   // Dispose terminal wrapper
-  const registry = getWorkspaceRegistry(DEFAULT_WORKSPACE_ID);
+  const currentWorkspace = activeWorkspaceId();
+  const registry = getWorkspaceRegistry(currentWorkspace);
   const wrapper = registry.get(sessionId);
   if (wrapper) {
     wrapper.dispose();
@@ -407,11 +419,172 @@ function moveFocus(direction: "up" | "down" | "left" | "right"): void {
   if (!adjacentId) return;
 
   panelGrid.setFocus(adjacentId);
-  const registry = getWorkspaceRegistry(DEFAULT_WORKSPACE_ID);
+  const registry = getWorkspaceRegistry(activeWorkspaceId());
   const wrapper = registry.get(adjacentId);
   if (wrapper) {
     wrapper.focusTerminal();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace switching
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle workspace switch: dispose current panels, fetch target layout,
+ * recreate panels for the target workspace.
+ */
+async function handleWorkspaceSwitch(fromId: string, toId: string): Promise<void> {
+  console.warn("[app] handleWorkspaceSwitch entry:", fromId, "->", toId);
+
+  if (!panelGrid) return;
+
+  // 1. Dispose all xterm.js instances in the current workspace
+  const fromRegistry = getWorkspaceRegistry(fromId);
+  for (const [, wrapper] of fromRegistry) {
+    wrapper.dispose();
+  }
+  fromRegistry.clear();
+
+  // 2. Clear the grid (remove all panel DOM elements)
+  panelGrid.disposeAllPanels();
+
+  // 3. Fetch target workspace layout from daemon
+  const layoutState = await apiGet<LayoutState>(
+    `/api/layout?workspace=${encodeURIComponent(toId)}`,
+  );
+
+  // 4. Fetch running sessions for title lookup
+  const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
+  const runningSessions = sessionList.filter((s) => s.status === "running");
+  const runningIds = new Set(runningSessions.map((s) => s.id));
+  const titleMap = new Map<string, string>();
+  for (const s of runningSessions) {
+    titleMap.set(s.id, s.title);
+  }
+
+  const hasLayout = layoutState.panels.length > 0;
+
+  if (hasLayout) {
+    // Mount panels from saved layout
+    const sortedPanels = [...layoutState.panels].sort((a, b) => a.position - b.position);
+    const mountedIds = new Set<string>();
+
+    for (const panel of sortedPanels) {
+      if (runningIds.has(panel.session_id)) {
+        const title = titleMap.get(panel.session_id) ?? "Terminal";
+        mountSessionToGrid(panel.session_id, title);
+        mountedIds.add(panel.session_id);
+      }
+    }
+
+    // Apply saved grid template if panel count matches
+    if (mountedIds.size === layoutState.panels.length && mountedIds.size > 0) {
+      panelGrid.applyLayoutTemplate(
+        layoutState.grid_template_columns,
+        layoutState.grid_template_rows,
+      );
+    }
+  }
+
+  // 5. Refit all terminals
+  refitAllTerminals();
+
+  console.warn("[app] handleWorkspaceSwitch exit:", toId);
+}
+
+/**
+ * Handle workspace close: check for running sessions, show dialog if needed,
+ * dispose terminals, and clean up daemon layout data.
+ */
+async function handleWorkspaceClose(workspaceId: string): Promise<void> {
+  console.warn("[app] handleWorkspaceClose entry:", workspaceId);
+
+  const registry = getWorkspaceRegistry(workspaceId);
+  const runningSessions: string[] = [];
+
+  // Check which sessions in this workspace are still running
+  try {
+    const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
+    const runningIds = new Set(
+      sessionList.filter((s) => s.status === "running").map((s) => s.id),
+    );
+    for (const sessionId of registry.keys()) {
+      if (runningIds.has(sessionId)) {
+        runningSessions.push(sessionId);
+      }
+    }
+  } catch (err: unknown) {
+    console.error("[app] handleWorkspaceClose: failed to fetch sessions:", err);
+  }
+
+  // If there are running sessions, show close dialog
+  if (runningSessions.length > 0) {
+    const saved = localStorage.getItem(CLOSE_PREFERENCE_KEY) as ClosePreference | null;
+    const validSaved = (saved === "detach" || saved === "kill") ? saved : undefined;
+
+    let action: ClosePreference = "detach";
+
+    if (validSaved) {
+      action = validSaved;
+    } else {
+      // Update dialog text for workspace context
+      const dialogTitle = document.querySelector("#close-dialog .dialog-title");
+      const originalText = dialogTitle?.textContent ?? "Close Panel";
+      if (dialogTitle) {
+        dialogTitle.textContent = `此 workspace 有 ${runningSessions.length} 個執行中的 session`;
+      }
+
+      const result = await showCloseDialog(validSaved);
+
+      // Restore dialog text
+      if (dialogTitle) {
+        dialogTitle.textContent = originalText;
+      }
+
+      if (!result) {
+        // User cancelled — abort workspace close
+        throw new Error("workspace close cancelled by user");
+      }
+
+      if (result.remember) {
+        localStorage.setItem(CLOSE_PREFERENCE_KEY, result.action);
+      }
+      action = result.action;
+    }
+
+    // Kill sessions if requested
+    if (action === "kill") {
+      for (const sessionId of runningSessions) {
+        try {
+          await apiDelete(`/api/sessions/${sessionId}`);
+        } catch (err: unknown) {
+          console.error("[app] handleWorkspaceClose: failed to kill session:", sessionId, err);
+        }
+      }
+    }
+  }
+
+  // Dispose all xterm.js instances in this workspace
+  for (const [, wrapper] of registry) {
+    wrapper.dispose();
+  }
+  registry.clear();
+  workspaces.delete(workspaceId);
+
+  // If this was the active workspace, clear the grid
+  if (wsManager && workspaceId === wsManager.getActiveId()) {
+    panelGrid?.disposeAllPanels();
+  }
+
+  // Delete workspace layout from daemon
+  try {
+    await apiDelete(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+  } catch (err: unknown) {
+    console.error("[app] handleWorkspaceClose: failed to delete workspace layout:", err);
+  }
+
+  console.warn("[app] handleWorkspaceClose exit:", workspaceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +618,24 @@ async function init(): Promise<void> {
   // to prevent intermediate saves from overwriting the daemon's saved custom
   // grid template with auto-tiled values during mount.
 
+  // Initialize WorkspaceManager
+  wsManager = new WorkspaceManager();
+
+  // Register workspace callbacks
+  wsManager.onSwitch((fromId: string, toId: string) => {
+    handleWorkspaceSwitch(fromId, toId).catch((err: unknown) => {
+      console.error("[app] workspace switch failed:", err);
+    });
+  });
+
+  wsManager.onCreate((_workspace: WorkspaceInfo) => {
+    // New workspace starts empty — panel will be created after switch
+  });
+
+  wsManager.onClose(async (workspaceId: string) => {
+    await handleWorkspaceClose(workspaceId);
+  });
+
   // Wire up the "+" button
   const addBtn = document.getElementById("add-panel-btn");
   if (addBtn) {
@@ -455,7 +646,7 @@ async function init(): Promise<void> {
     });
   }
 
-  // Keyboard shortcuts (AC-5, AC-6, AC-7)
+  // Keyboard shortcuts (AC-5, AC-6, AC-7, workspace shortcuts)
   document.addEventListener("keydown", (e: KeyboardEvent) => {
     // All shortcuts require Ctrl+Shift
     if (!e.ctrlKey || !e.shiftKey) {
@@ -473,16 +664,45 @@ async function init(): Promise<void> {
         break;
       }
 
-      // Ctrl+Shift+W: Close focused panel (AC-6)
+      // Ctrl+Shift+W: Close focused panel (AC-6, AC-8)
       case "W":
       case "w": {
         e.preventDefault();
         const focusedId = panelGrid?.getFocusedPanelId();
         if (focusedId) {
+          // AC-8: Don't close the last panel in the last workspace
+          const panelCount = panelGrid?.getPanelCount() ?? 0;
+          const workspaceCount = wsManager?.getCount() ?? 1;
+          if (panelCount <= 1 && workspaceCount <= 1) {
+            console.warn("[app] cannot close last panel in last workspace");
+            break;
+          }
           closePanelFlow(focusedId, false).catch((err: unknown) => {
             console.error("[app] failed to close panel via shortcut:", err);
           });
         }
+        break;
+      }
+
+      // Ctrl+Shift+T: New workspace (AC-4)
+      case "T":
+      case "t": {
+        e.preventDefault();
+        wsManager?.createWorkspace();
+        break;
+      }
+
+      // Ctrl+Shift+PageUp: Previous workspace (AC-6)
+      case "PageUp": {
+        e.preventDefault();
+        wsManager?.switchPrevious();
+        break;
+      }
+
+      // Ctrl+Shift+PageDown: Next workspace (AC-6)
+      case "PageDown": {
+        e.preventDefault();
+        wsManager?.switchNext();
         break;
       }
 
@@ -510,10 +730,26 @@ async function init(): Promise<void> {
     }
   });
 
-  // Fetch sessions and layout state for reconciliation
+  // Fetch workspace list from daemon
+  let workspaceIds: string[] = [];
+  try {
+    workspaceIds = await apiGet<WorkspaceListResponse>("/api/workspaces");
+  } catch (err: unknown) {
+    console.warn("[app] failed to fetch workspace list, starting fresh:", err);
+  }
+
+  // Initialize WorkspaceManager (sets active workspace from localStorage or first)
+  wsManager.initFromList(workspaceIds);
+
+  const activeWorkspace = wsManager.getActiveId();
+  console.warn("[app] active workspace:", activeWorkspace);
+
+  // Fetch sessions and layout state for the active workspace
   const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
   const runningSessions = sessionList.filter((s) => s.status === "running");
-  const layoutState = await apiGet<LayoutState>("/api/layout");
+  const layoutState = await apiGet<LayoutState>(
+    `/api/layout?workspace=${encodeURIComponent(activeWorkspace)}`,
+  );
 
   const hasLayout = layoutState.panels.length > 0;
   const runningIds = new Set(runningSessions.map((s) => s.id));

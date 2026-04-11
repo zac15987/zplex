@@ -243,14 +243,25 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 // Layout endpoints
 // ---------------------------------------------------------------------------
 
-// handleGetLayout returns the current layout state.
-// Returns HTTP 200 with empty state if no layout has been saved.
+// handleGetLayout returns the layout state for a workspace.
+// The workspace is determined by the ?workspace= query parameter (default: "default").
+// Returns HTTP 200 with empty state if no layout has been saved for the workspace.
 func (s *Server) handleGetLayout(w http.ResponseWriter, r *http.Request) {
-	slog.Info("server.handleGetLayout: retrieving layout")
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "default"
+	}
+	slog.Info("server.handleGetLayout: retrieving layout",
+		slog.String("workspace", workspace),
+	)
 
 	s.layoutMu.Lock()
-	state := s.layout
+	state, exists := s.layouts[workspace]
 	s.layoutMu.Unlock()
+
+	if !exists {
+		state = layoutState{}
+	}
 
 	// Ensure panels is never null in JSON output
 	if state.Panels == nil {
@@ -258,15 +269,23 @@ func (s *Server) handleGetLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("server.handleGetLayout: layout retrieved",
+		slog.String("workspace", workspace),
 		slog.Int("panels", len(state.Panels)),
 	)
 
 	writeJSON(w, http.StatusOK, state)
 }
 
-// handlePutLayout saves a new layout state, replacing any previous state.
+// handlePutLayout saves a new layout state for a workspace, replacing any previous state.
+// The workspace is determined by the ?workspace= query parameter (default: "default").
 func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
-	slog.Info("server.handlePutLayout: processing layout save")
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "default"
+	}
+	slog.Info("server.handlePutLayout: processing layout save",
+		slog.String("workspace", workspace),
+	)
 
 	var state layoutState
 	if err := json.NewDecoder(r.Body).Decode(&state); err != nil {
@@ -283,14 +302,66 @@ func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.layoutMu.Lock()
-	s.layout = state
+	s.layouts[workspace] = state
 	s.layoutMu.Unlock()
 
 	slog.Info("server.handlePutLayout: layout saved",
+		slog.String("workspace", workspace),
 		slog.Int("panels", len(state.Panels)),
 	)
 
 	writeJSON(w, http.StatusOK, state)
+}
+
+// ---------------------------------------------------------------------------
+// Workspace endpoints
+// ---------------------------------------------------------------------------
+
+// handleListWorkspaces returns the list of workspace IDs that have layout data.
+func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handleListWorkspaces: listing workspaces")
+
+	s.layoutMu.Lock()
+	ids := make([]string, 0, len(s.layouts))
+	for id := range s.layouts {
+		ids = append(ids, id)
+	}
+	s.layoutMu.Unlock()
+
+	slog.Info("server.handleListWorkspaces: returning workspaces",
+		slog.Int("count", len(ids)),
+	)
+
+	writeJSON(w, http.StatusOK, ids)
+}
+
+// handleDeleteWorkspace removes the layout data for a specific workspace.
+func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	slog.Info("server.handleDeleteWorkspace: deleting workspace layout",
+		slog.String("workspace", id),
+	)
+
+	s.layoutMu.Lock()
+	_, exists := s.layouts[id]
+	if exists {
+		delete(s.layouts, id)
+	}
+	s.layoutMu.Unlock()
+
+	if !exists {
+		slog.Warn("server.handleDeleteWorkspace: workspace not found",
+			slog.String("workspace", id),
+		)
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+
+	slog.Info("server.handleDeleteWorkspace: workspace layout deleted",
+		slog.String("workspace", id),
+	)
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------------------------------------------------------------------------

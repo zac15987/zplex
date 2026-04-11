@@ -178,6 +178,35 @@ export class PanelGrid {
     console.warn("[layout] removePanel exit:", sessionId);
   }
 
+  /**
+   * Remove all panels from the grid. Used during workspace switching to
+   * clear the grid before recreating panels for the target workspace.
+   * Does NOT fire onLayoutChange to avoid intermediate saves.
+   */
+  disposeAllPanels(): void {
+    console.warn("[layout] disposeAllPanels entry, panels:", this.panelOrder.length);
+
+    // Remove all children from container
+    while (this.container.firstChild) {
+      this.container.removeChild(this.container.firstChild);
+    }
+
+    // Clear internal state
+    this.panelMap.clear();
+    this.panelOrder.length = 0;
+    this.focusedPanelId = null;
+    this.columnSizes = [];
+    this.rowSizes = [];
+    this.currentConfig = { columns: 0, rows: 0, topRowCount: 0, bottomRowCount: 0 };
+
+    // Reset container grid styles
+    this.container.style.display = "";
+    this.container.style.gridTemplateColumns = "";
+    this.container.style.gridTemplateRows = "";
+
+    console.warn("[layout] disposeAllPanels exit");
+  }
+
   /** Set focus on a panel, removing focus from all others. */
   setFocus(sessionId: string): void {
     console.warn("[layout] setFocus:", sessionId);
