@@ -75,7 +75,7 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 - **Maximum 8 workspaces**. Attempts to add more are ignored with a console warning.
 - **Auto-naming**: New workspaces are named "Workspace N" (N auto-increments). Double-click tab to rename.
 - **Active workspace persistence**: Current workspace ID stored in `localStorage` key `zplex:activeWorkspace`. Restored on app restart.
-- **Close workspace**: Shows confirmation dialog if workspace has running sessions (shares `zplex:closePreference` with panel close). Last workspace cannot be closed.
+- **Close workspace**: Shows confirmation dialog if workspace has running sessions (`zplex:workspaceClosePreference`). Panel close uses a separate key (`zplex:panelClosePreference`). Last workspace cannot be closed.
 
 ### Keyboard Shortcuts
 
