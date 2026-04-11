@@ -19,6 +19,7 @@ import type {
   CreateSessionResponse,
   ClosePreference,
   CloseDialogResult,
+  LayoutState,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,40 @@ async function apiDelete(path: string): Promise<void> {
   if (!resp.ok) {
     throw new Error(`DELETE ${path} failed: ${resp.status} ${resp.statusText}`);
   }
+}
+
+/** Typed PUT against the daemon REST API. */
+async function apiPut<TReq>(path: string, body: TReq): Promise<void> {
+  const port = getDaemonPort();
+  const resp = await fetch(`http://localhost:${port}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(`PUT ${path} failed: ${resp.status} ${resp.statusText}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layout persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Save the current layout state to the daemon via PUT /api/layout.
+ * Called automatically on panel add/remove and gutter drag end.
+ */
+function saveLayout(): void {
+  if (!panelGrid) {
+    return;
+  }
+
+  const state: LayoutState = panelGrid.serializeLayout();
+  console.warn("[app] saveLayout: saving", state.panels.length, "panels");
+
+  apiPut("/api/layout", state).catch((err: unknown) => {
+    console.error("[app] saveLayout: failed to save layout:", err);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +439,11 @@ async function init(): Promise<void> {
   // Register resize callback for FitAddon
   panelGrid.onPanelResize(() => {
     refitAllTerminals();
+  });
+
+  // Register layout auto-save callback (fires on panel add/remove and gutter drag end)
+  panelGrid.onLayoutChange(() => {
+    saveLayout();
   });
 
   // Wire up the "+" button
