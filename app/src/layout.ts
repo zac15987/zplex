@@ -243,6 +243,11 @@ export class PanelGrid {
     return this.panelOrder.length;
   }
 
+  /** Return the titles of all current panels. */
+  getExistingTitles(): string[] {
+    return this.panelOrder.map(id => this.panelMap.get(id)?.title ?? "");
+  }
+
   /**
    * Find the adjacent panel in a given direction from the specified panel.
    *

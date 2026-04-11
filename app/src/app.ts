@@ -147,6 +147,14 @@ function saveLayout(): void {
 // Panel creation and mounting
 // ---------------------------------------------------------------------------
 
+/** Return the next available "Terminal N" name that doesn't collide with existing panels. */
+function nextTerminalName(): string {
+  const titles = new Set(panelGrid?.getExistingTitles() ?? []);
+  let n = 1;
+  while (titles.has(`Terminal ${n}`)) n++;
+  return `Terminal ${n}`;
+}
+
 /**
  * Create a new session on the daemon, add a panel to the grid, mount an xterm
  * instance into it, and register everything.
@@ -162,7 +170,7 @@ async function createAndMountPanel(title?: string): Promise<void> {
   // Create session on daemon
   const request: CreateSessionRequest = {
     shell: "pwsh", // Uses daemon's default_shell in production
-    title: title ?? `Terminal ${panelGrid.getPanelCount() + 1}`,
+    title: title ?? nextTerminalName(),
     cols: DEFAULT_COLS,
     rows: DEFAULT_ROWS,
   };
