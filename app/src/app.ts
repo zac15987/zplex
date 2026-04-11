@@ -511,20 +511,85 @@ async function init(): Promise<void> {
     }
   });
 
-  // Fetch existing sessions and reconnect
+  // Fetch sessions and layout state for reconciliation
   const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
   const runningSessions = sessionList.filter((s) => s.status === "running");
+  const layoutState = await apiGet<LayoutState>("/api/layout");
 
-  if (runningSessions.length > 0) {
-    console.warn("[app] reconnecting to", runningSessions.length, "running sessions");
+  const hasLayout = layoutState.panels.length > 0;
+  const runningIds = new Set(runningSessions.map((s) => s.id));
+
+  if (hasLayout) {
+    console.warn("[app] restore: layout found with", layoutState.panels.length, "panels");
+
+    // Build a title lookup from running sessions
+    const titleMap = new Map<string, string>();
+    for (const s of runningSessions) {
+      titleMap.set(s.id, s.title);
+    }
+
+    // (a) Mount panels from layout in position order (only if session still exists)
+    const sortedPanels = [...layoutState.panels].sort((a, b) => a.position - b.position);
+    const mountedIds = new Set<string>();
+
+    for (const panel of sortedPanels) {
+      if (runningIds.has(panel.session_id)) {
+        const title = titleMap.get(panel.session_id) ?? "Terminal";
+        mountSessionToGrid(panel.session_id, title);
+        mountedIds.add(panel.session_id);
+      } else {
+        // (c) Layout references a dead session — skip
+        console.warn("[app] restore: skipping dead session:", panel.session_id);
+      }
+    }
+
+    // (b) Append sessions that exist but are not in layout
+    for (const s of runningSessions) {
+      if (!mountedIds.has(s.id)) {
+        console.warn("[app] restore: appending unlisted session:", s.id);
+        mountSessionToGrid(s.id, s.title);
+        mountedIds.add(s.id);
+      }
+    }
+
+    // AC-8: If actual panel count differs from layout record count
+    // (due to skipped or appended sessions), use auto-tiled grid template.
+    // Only apply saved grid template when counts match exactly.
+    const layoutPanelCount = layoutState.panels.length;
+    const actualPanelCount = mountedIds.size;
+
+    if (actualPanelCount === layoutPanelCount && actualPanelCount > 0) {
+      // Panel count matches — apply saved grid template values
+      console.warn("[app] restore: applying saved grid template");
+      panelGrid.applyLayoutTemplate(
+        layoutState.grid_template_columns,
+        layoutState.grid_template_rows,
+      );
+    } else if (actualPanelCount !== layoutPanelCount) {
+      // Count mismatch — auto-tiled grid was already set by rebuildGrid
+      console.warn("[app] restore: panel count mismatch (layout:", layoutPanelCount,
+        "actual:", actualPanelCount, "), using auto-tiled grid");
+    }
+
+    // If no panels were mounted at all, create a fresh one
+    if (mountedIds.size === 0) {
+      console.warn("[app] restore: no sessions survived reconciliation, creating initial session");
+      await createAndMountPanel("Terminal 1");
+    }
+  } else if (runningSessions.length > 0) {
+    // AC-9: No saved layout — fall back to default behavior
+    console.warn("[app] no layout saved, reconnecting to", runningSessions.length, "running sessions");
     for (const session of runningSessions) {
       mountSessionToGrid(session.id, session.title);
     }
   } else {
-    // No running sessions — create a fresh one
+    // No sessions and no layout — create a fresh one
     console.warn("[app] no running sessions, creating initial session");
     await createAndMountPanel("Terminal 1");
   }
+
+  // AC-10: Refit all terminals after reconciliation
+  refitAllTerminals();
 
   console.warn("[app] init exit");
 }
