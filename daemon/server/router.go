@@ -29,8 +29,8 @@ type Server struct {
 	mgr       *session.SessionManager
 	startTime time.Time
 	version   string
-	layoutMu  sync.Mutex
-	layout    layoutState
+	layoutMu sync.Mutex
+	layouts  map[string]layoutState // key = workspace ID
 }
 
 // NewServer creates a Server wired to the given session manager. The returned
@@ -42,6 +42,7 @@ func NewServer(mgr *session.SessionManager) *Server {
 		mgr:       mgr,
 		startTime: time.Now(),
 		version:   "0.1.0",
+		layouts:   make(map[string]layoutState),
 	}
 }
 

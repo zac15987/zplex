@@ -243,14 +243,25 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 // Layout endpoints
 // ---------------------------------------------------------------------------
 
-// handleGetLayout returns the current layout state.
-// Returns HTTP 200 with empty state if no layout has been saved.
+// handleGetLayout returns the layout state for a workspace.
+// The workspace is determined by the ?workspace= query parameter (default: "default").
+// Returns HTTP 200 with empty state if no layout has been saved for the workspace.
 func (s *Server) handleGetLayout(w http.ResponseWriter, r *http.Request) {
-	slog.Info("server.handleGetLayout: retrieving layout")
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "default"
+	}
+	slog.Info("server.handleGetLayout: retrieving layout",
+		slog.String("workspace", workspace),
+	)
 
 	s.layoutMu.Lock()
-	state := s.layout
+	state, exists := s.layouts[workspace]
 	s.layoutMu.Unlock()
+
+	if !exists {
+		state = layoutState{}
+	}
 
 	// Ensure panels is never null in JSON output
 	if state.Panels == nil {
@@ -258,15 +269,23 @@ func (s *Server) handleGetLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("server.handleGetLayout: layout retrieved",
+		slog.String("workspace", workspace),
 		slog.Int("panels", len(state.Panels)),
 	)
 
 	writeJSON(w, http.StatusOK, state)
 }
 
-// handlePutLayout saves a new layout state, replacing any previous state.
+// handlePutLayout saves a new layout state for a workspace, replacing any previous state.
+// The workspace is determined by the ?workspace= query parameter (default: "default").
 func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
-	slog.Info("server.handlePutLayout: processing layout save")
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "default"
+	}
+	slog.Info("server.handlePutLayout: processing layout save",
+		slog.String("workspace", workspace),
+	)
 
 	var state layoutState
 	if err := json.NewDecoder(r.Body).Decode(&state); err != nil {
@@ -283,10 +302,11 @@ func (s *Server) handlePutLayout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.layoutMu.Lock()
-	s.layout = state
+	s.layouts[workspace] = state
 	s.layoutMu.Unlock()
 
 	slog.Info("server.handlePutLayout: layout saved",
+		slog.String("workspace", workspace),
 		slog.Int("panels", len(state.Panels)),
 	)
 
