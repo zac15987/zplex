@@ -1,7 +1,7 @@
 # zplex — Project Plan
 
-> Version: 1.2
-> Date: 2026-04-11
+> Version: 1.3
+> Date: 2026-04-12
 > Author: Jeff (zac) + Claude
 > Repo: github.com/zac15987/zplex
 > License: MIT
@@ -206,9 +206,9 @@ zplex/
 
 ## 5. Milestones
 
-> **Progress (2026-04-11):** M1 complete — all three issues (#1, #2, #5) are merged and closed. The Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay) and the Electron shell with xterm.js frontend is working (single panel, session reconnect). M2 in progress — #11 (workspace tab bar + dispose/recreate switching) is done; remaining M2 issues (multi-panel layout, panel resize, layout persistence) are planned.
+> **Progress (2026-04-12):** M1 and M2 complete — all six issues (#1, #2, #5, #7, #8, #11) are merged and closed. The Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay, per-workspace layout persistence) and the Electron app has multi-panel auto-tiled CSS Grid layout, draggable gutter resize, keyboard navigation, close confirmation dialogs, layout restore reconciliation, and workspace tabs with dispose/recreate switching. M3 is next.
 >
-> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. Issue #5 was delivered via PR #6. Remaining issues use TBD as they haven't been filed on GitHub yet.
+> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. The original M2 "multi-panel layout" and "panel resize + keyboard navigation" items were combined into a single issue #7. Remaining issues use TBD as they haven't been filed on GitHub yet.
 
 ### M1: Skeleton — single terminal works end-to-end
 
@@ -234,10 +234,9 @@ zplex/
 
 | Issue | Title | Description | Status | Depends |
 |---|---|---|---|---|
-| TBD | Frontend: multi-panel layout with CSS Grid | Add panel (button + keyboard shortcut), remove panel, CSS Grid dynamic columns/rows, each panel is an xterm.js instance connected to a separate daemon session | Planned | M1 |
-| TBD | Panel resize + keyboard navigation | Drag-to-resize panel borders, keyboard shortcuts (Ctrl+Shift+Arrow to navigate, Ctrl+Shift+N to new panel), focus indicator (highlighted border) | Planned | multi-panel |
-| TBD | Layout persistence | Save panel layout + session mapping to daemon (GET/PUT /api/layout). On reconnect, restore exact panel arrangement | Planned | panel resize |
-| #11 | Workspace tab bar + dispose/recreate switching | Tab bar UI, WorkspaceManager, dispose/recreate xterm.js on workspace switch, workspace CRUD API, layout per workspace | ✅ Done | layout persistence |
+| #7 | Frontend: multi-panel layout + panel interaction (auto-tiled CSS Grid) | PanelGrid class with auto-tile algorithm (1-2 rows, ceil(N/2) columns), draggable gutter resize (min 120×80px), click-to-focus + keyboard navigation (Ctrl+Shift+Arrow), close dialog with localStorage preference, Shift+click override, max 8 panels, workspace-scoped session registry | ✅ Done (PR #9, 2026-04-11) | M1 |
+| #8 | Layout persistence (daemon layout API + restore reconciliation) | GET/PUT /api/layout endpoints, auto-save on panel add/remove and gutter drag end, restore reconciliation on init (mount saved order, skip dead sessions, append unlisted), grid template preservation | ✅ Done (PR #10, 2026-04-11) | #7 |
+| #11 | Workspace tab bar + dispose/recreate switching | Tab bar UI, WorkspaceManager, dispose/recreate xterm.js on workspace switch, per-workspace layout API (?workspace= param), workspace CRUD endpoints, Ctrl+Shift+T/PageUp/PageDown shortcuts, max 8 workspaces, active workspace persistence via localStorage | ✅ Done (PR #12, 2026-04-11) | #8 |
 
 **Demo scenario after M2:**
 1. Open zplex → one panel
