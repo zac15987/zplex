@@ -771,6 +771,22 @@ async function init(): Promise<void> {
     `/api/layout?workspace=${encodeURIComponent(activeWorkspace)}`,
   );
 
+  // Collect session IDs claimed by other workspaces to prevent cross-mounting.
+  const otherWorkspaceSessionIds = new Set<string>();
+  for (const wsId of workspaceIds) {
+    if (wsId === activeWorkspace) continue;
+    try {
+      const otherLayout = await apiGet<LayoutState>(
+        `/api/layout?workspace=${encodeURIComponent(wsId)}`,
+      );
+      for (const panel of otherLayout.panels) {
+        otherWorkspaceSessionIds.add(panel.session_id);
+      }
+    } catch {
+      // Workspace may not have layout data
+    }
+  }
+
   const hasLayout = layoutState.panels.length > 0;
   const runningIds = new Set(runningSessions.map((s) => s.id));
 
@@ -798,9 +814,9 @@ async function init(): Promise<void> {
       }
     }
 
-    // (b) Append sessions that exist but are not in layout
+    // (b) Append sessions that exist but are not in any workspace's layout
     for (const s of runningSessions) {
-      if (!mountedIds.has(s.id)) {
+      if (!mountedIds.has(s.id) && !otherWorkspaceSessionIds.has(s.id)) {
         console.warn("[app] restore: appending unlisted session:", s.id);
         mountSessionToGrid(s.id, s.title);
         mountedIds.add(s.id);
@@ -835,7 +851,9 @@ async function init(): Promise<void> {
     // AC-9: No saved layout — fall back to default behavior
     console.warn("[app] no layout saved, reconnecting to", runningSessions.length, "running sessions");
     for (const session of runningSessions) {
-      mountSessionToGrid(session.id, session.title);
+      if (!otherWorkspaceSessionIds.has(session.id)) {
+        mountSessionToGrid(session.id, session.title);
+      }
     }
   } else {
     // No sessions and no layout — create a fresh one
