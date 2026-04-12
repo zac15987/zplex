@@ -18,7 +18,8 @@ go build -o zplex-daemon.exe .    # build
 go run .                           # run (default port 17732)
 go run . --port 17732              # explicit port
 go test ./...                      # all tests
-go test ./session/                 # single package tests
+go test ./session/                 # session package tests
+go test ./server/                  # server package tests (REST + WebSocket)
 go test -run TestSessionCreate ./session/  # single test
 ```
 
@@ -46,7 +47,7 @@ Electron (main.ts)
 Frontend (TypeScript + xterm.js)
   → one xterm.js instance per panel
   → each connects via WebSocket to /ws/{session_id}
-  → layout managed by CSS Grid
+  → layout managed by CSS Grid + workspace tabs
 
 Go Daemon (single binary, port 17732)
   → REST API: session CRUD, health, layout state
@@ -55,6 +56,39 @@ Go Daemon (single binary, port 17732)
   → ring buffer (100KB default) per session for reconnect replay
 ```
 
+### Multi-Panel Layout
+
+The frontend uses an auto-tiled CSS Grid layout engine (`app/src/layout.ts`) that manages terminal panels dynamically:
+
+- **PanelGrid class** (`layout.ts`): Manages panel placement, gutter resize, and focus tracking.
+- **Auto-tile algorithm**: Panels auto-arrange in 1-2 rows. Columns = ceil(N/2). Bottom row panels span to fill width when fewer than top row.
+- **Maximum 8 panels** per workspace. Attempts to add more are silently ignored with a console warning.
+- **Workspace-scoped registry**: Sessions are organized as `Map<workspaceId, Map<sessionId, TerminalWrapper>>` in `app.ts`. Current default workspace is `"default"`.
+- **Gutter drag resize**: Panels can be resized by dragging gutter bars between them. Minimum panel size: 120px wide, 80px tall.
+
+### Workspace Tabs
+
+The frontend supports multiple workspaces, each with its own set of terminal panels:
+
+- **WorkspaceManager** (`workspace.ts`): Manages workspace lifecycle — create, switch, close, rename. Renders the tab bar UI. Fires callbacks that `app.ts` handles for terminal dispose/recreate.
+- **Dispose/Recreate mechanism**: When switching workspaces, all xterm.js instances in the current workspace are disposed (freeing memory + WebGL contexts). The target workspace's panels are recreated from daemon layout data, with ring buffer replay providing near-instant recovery.
+- **Maximum 8 workspaces**. Attempts to add more are ignored with a console warning.
+- **Auto-naming**: New workspaces are named "Workspace N" (N auto-increments). Double-click tab to rename.
+- **Active workspace persistence**: Current workspace ID stored in `localStorage` key `zplex:activeWorkspace`. Restored on app restart.
+- **Close workspace**: Shows confirmation dialog if workspace has running sessions (`zplex:workspaceClosePreference`). Panel close uses a separate key (`zplex:panelClosePreference`). Last workspace cannot be closed.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+N` | Create new terminal panel |
+| `Ctrl+Shift+T` | Create new workspace tab |
+| `Ctrl+Shift+W` | Close focused panel (shows dialog or uses saved preference) |
+| `Ctrl+Shift+Arrow` | Move focus to adjacent panel (Up/Down/Left/Right) |
+| `Ctrl+Shift+PageUp` | Switch to previous workspace (wraps around) |
+| `Ctrl+Shift+PageDown` | Switch to next workspace (wraps around) |
+| `Shift+Click [×]` | Force close dialog (override saved preference) |
+
 ### Daemon REST API
 
 | Method | Path | Purpose |
@@ -62,7 +96,9 @@ Go Daemon (single binary, port 17732)
 | GET | `/api/health` | Health check + version |
 | GET/POST | `/api/sessions` | List / create sessions |
 | GET/DELETE/PATCH | `/api/sessions/{id}` | Get / kill / update session |
-| GET/PUT | `/api/layout` | Get / save panel layout |
+| GET/PUT | `/api/layout` | Get / save panel layout (per workspace) |
+| GET | `/api/workspaces` | List workspace IDs with layout data |
+| DELETE | `/api/workspaces/{id}` | Delete workspace layout data |
 | GET | `/api/events` | SSE stream for real-time updates |
 
 ### WebSocket Protocol (`/ws/{session_id}`)
@@ -74,7 +110,7 @@ Go Daemon (single binary, port 17732)
 
 - **xterm.js v6**: Use `@xterm/xterm` and `@xterm/addon-*` (scoped packages). The old unscoped `xterm-addon-*` packages are deprecated and must NOT be used.
 - **Go PTY**: `aymanbagabas/go-pty` — handles ConPTY (Windows) and /dev/ptmx (Unix).
-- **WebSocket**: `gorilla/websocket` v1.5.0 — must be >=v1.4.1 (DoS fix).
+- **WebSocket**: `gorilla/websocket` v1.5.3 — must be >=v1.4.1 (DoS fix).
 - **Go logging**: `log/slog` (structured). No `fmt.Println` for logging.
 - **Frontend logging**: `console.warn`/`console.error` only. No `console.log` in production code.
 - **TypeScript**: Strict mode. No `any`. Prefer `const`.
@@ -100,3 +136,7 @@ zplex config lives at `~/.zplex/config.toml`. Key sections: `[daemon]` (port, de
 ## zpit Integration
 
 zplex is tightly coupled with zpit. In M4+, zpit's `LaunchClaude()` detects a running zplex daemon and POSTs to its API to create agent panels instead of opening new terminal tabs. Sessions carry metadata: `source`, `project_id`, `issue_id`, `role` (coder/reviewer).
+
+## Interaction Rules
+
+- **Do NOT modify code unless explicitly asked.** When the user asks a question, answer it — do not edit files. Wait for clear instruction (e.g., "fix it", "change it", "update it") before making changes.
