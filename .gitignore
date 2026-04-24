@@ -1,11 +1,3 @@
-
-# Zpit auto-deploy
-.claude/agents/
-.claude/docs/
-.claude/hooks/
-.claude/settings.local.json
-.mcp.json
-
 # Go daemon
 daemon/*.exe
 daemon/*.dll
@@ -14,3 +6,12 @@ daemon/*.dll
 app/node_modules/
 app/dist/
 app/dist-electron/
+
+# Zpit auto-deploy
+.claude/agents/
+.claude/docs/
+.claude/hooks/
+.claude/settings.local.json
+.mcp.json
+.claude/settings.json
+.zpit-children/
