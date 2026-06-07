@@ -13,6 +13,17 @@ Replaces scattered terminal tabs with a single Electron window — one fixed pan
 
 ### Build & Run
 
+**Quickest (PowerShell helper scripts at the repo root):**
+
+```powershell
+./dev.ps1       # one-click: rebuild the daemon, then launch the app (dev mode)
+./build.ps1     # compile both components (daemon exe + frontend)
+```
+
+`build.ps1` also accepts `-DaemonOnly`, `-AppOnly`, and `-Install`. See `./build.ps1 -?` for details.
+
+**Manual steps:**
+
 1. **Build the daemon:**
    ```bash
    cd daemon

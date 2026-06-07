@@ -101,6 +101,15 @@ declare global {
 /** User preference for what happens when closing a panel. */
 export type ClosePreference = "detach" | "kill";
 
+/**
+ * Persisted close preferences, owned by the daemon (GET/PUT /api/preferences).
+ * An empty string means the preference is unset (no remembered choice).
+ */
+export interface ClosePreferences {
+  panel_close: ClosePreference | "";
+  workspace_close: ClosePreference | "";
+}
+
 /** A single panel in the CSS Grid layout. */
 export interface PanelInfo {
   /** The daemon session ID. */

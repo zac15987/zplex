@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/session"
 )
 
@@ -31,18 +32,20 @@ type Server struct {
 	version   string
 	layoutMu sync.Mutex
 	layouts  map[string]layoutState // key = workspace ID
+	prefs    *prefs.Store
 }
 
-// NewServer creates a Server wired to the given session manager. The returned
-// Server exposes a Handler() method that produces a fully-configured
-// http.Handler (mux + middleware).
-func NewServer(mgr *session.SessionManager) *Server {
+// NewServer creates a Server wired to the given session manager and
+// preferences store. The returned Server exposes a Handler() method that
+// produces a fully-configured http.Handler (mux + middleware).
+func NewServer(mgr *session.SessionManager, prefsStore *prefs.Store) *Server {
 	slog.Info("server.NewServer: initializing HTTP server")
 	return &Server{
 		mgr:       mgr,
 		startTime: time.Now(),
 		version:   "0.1.0",
 		layouts:   make(map[string]layoutState),
+		prefs:     prefsStore,
 	}
 }
 
@@ -63,6 +66,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("DELETE /api/workspaces/{id}", s.handleDeleteWorkspace)
+
+	mux.HandleFunc("GET /api/preferences", s.handleGetPreferences)
+	mux.HandleFunc("PUT /api/preferences", s.handlePutPreferences)
 
 	mux.HandleFunc("GET /ws/{session_id}", s.handleWebSocket)
 

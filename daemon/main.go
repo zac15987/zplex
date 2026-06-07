@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zac15987/zplex/daemon/config"
+	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/server"
 	"github.com/zac15987/zplex/daemon/session"
 )
@@ -26,8 +27,18 @@ func main() {
 	// Create SessionManager with config-driven defaults.
 	mgr := session.NewSessionManager(cfg.DefaultShell, cfg.BufferSize)
 
+	// Load persisted user preferences. A corrupt/unreadable file must not
+	// block daemon startup — fall back to an empty in-memory store.
+	prefsStore, err := prefs.NewStore()
+	if err != nil {
+		slog.Warn("failed to load preferences, starting with empty store",
+			slog.String("error", err.Error()),
+		)
+		prefsStore = prefs.NewEmptyStore()
+	}
+
 	// Build the HTTP/WebSocket server wired to the session manager.
-	srv := server.NewServer(mgr)
+	srv := server.NewServer(mgr, prefsStore)
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),

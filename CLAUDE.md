@@ -10,6 +10,25 @@ zplex (zac + multiplex) is a terminal multiplexer desktop app purpose-built for 
 
 ## Build & Run
 
+### Convenience Scripts (repo root, PowerShell)
+
+```powershell
+./build.ps1                # compile both components (daemon exe + frontend)
+./build.ps1 -DaemonOnly    # rebuild only the Go daemon
+./build.ps1 -AppOnly       # build only the frontend
+./build.ps1 -Install       # force npm install, then build both
+
+./dev.ps1                  # one-click: rebuild daemon, then `npm run dev`
+./dev.ps1 -Install         # refresh npm deps first, then rebuild + launch
+```
+
+`dev.ps1` is the day-to-day UI test loop (single terminal). It rebuilds
+`daemon/zplex-daemon.exe` first so the binary `npm run dev` auto-spawns contains
+the latest Go code — without this, dev mode silently runs a stale daemon. The
+auto-spawned daemon's output is discarded (`stdio: "ignore"`); to see daemon
+logs, run `go run .` manually in a separate terminal (the app detects the
+already-running daemon and skips spawning).
+
 ### Go Daemon (`daemon/`)
 
 ```bash
@@ -35,7 +54,9 @@ npx electron-builder               # produce .exe installer
 
 ### Full Stack Dev
 
-Start the daemon first, then the Electron app. The Electron main process can also auto-spawn the daemon as a child process.
+Easiest path: `./dev.ps1` (rebuilds the daemon, then launches the app, which auto-spawns the freshly built daemon).
+
+Manual path: start the daemon first (`cd daemon; go run .`), then the Electron app (`cd app; npm run dev`). The Electron main process auto-spawns the daemon as a child process only when one isn't already running — running it manually lets you see daemon logs.
 
 ## Architecture
 
@@ -74,8 +95,8 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 - **Dispose/Recreate mechanism**: When switching workspaces, all xterm.js instances in the current workspace are disposed (freeing memory + WebGL contexts). The target workspace's panels are recreated from daemon layout data, with ring buffer replay providing near-instant recovery.
 - **Maximum 8 workspaces**. Attempts to add more are ignored with a console warning.
 - **Auto-naming**: New workspaces are named "Workspace N" (N auto-increments). Double-click tab to rename.
-- **Active workspace persistence**: Current workspace ID stored in `localStorage` key `zplex:activeWorkspace`. Restored on app restart.
-- **Close workspace**: Shows confirmation dialog if workspace has running sessions (`zplex:workspaceClosePreference`). Panel close uses a separate key (`zplex:panelClosePreference`). Last workspace cannot be closed.
+- **Active workspace persistence**: Current workspace ID stored in `localStorage` key `zplex:activeWorkspace` (pure UI state — kept in the frontend). Restored on app restart.
+- **Close workspace**: Shows confirmation dialog if workspace has running sessions. The remembered detach/kill choice for both panel close and workspace close is owned by the daemon and persisted to `~/.zplex/preferences.json` via `GET/PUT /api/preferences` (loaded once at startup into a frontend cache). Last workspace cannot be closed.
 
 ### Keyboard Shortcuts
 
@@ -99,6 +120,7 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 | GET/PUT | `/api/layout` | Get / save panel layout (per workspace) |
 | GET | `/api/workspaces` | List workspace IDs with layout data |
 | DELETE | `/api/workspaces/{id}` | Delete workspace layout data |
+| GET/PUT | `/api/preferences` | Get / save app-managed user preferences (close behavior), persisted to `~/.zplex/preferences.json` |
 | GET | `/api/events` | SSE stream for real-time updates |
 
 ### WebSocket Protocol (`/ws/{session_id}`)
@@ -131,7 +153,9 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 
 ## Configuration
 
-zplex config lives at `~/.zplex/config.toml`. Key sections: `[daemon]` (port, default_shell, buffer_size), `[zpit]` (auto-create fixed panel), `[electron]` (tray behavior, daemon lifecycle), `[appearance]` (theme, font).
+zplex config lives at `~/.zplex/config.toml`. Key sections: `[daemon]` (port, default_shell, buffer_size), `[zpit]` (auto-create fixed panel), `[electron]` (tray behavior, daemon lifecycle), `[appearance]` (theme, font). This file is **read-only** to the daemon (loaded once at startup; user hand-edited).
+
+App-managed mutable preferences (currently close behavior) live separately in `~/.zplex/preferences.json`, owned by the daemon's `prefs` package and read/written at runtime via `GET/PUT /api/preferences`. Kept apart from `config.toml` so runtime writes never clobber the user's hand-edited TOML.
 
 ## zpit Integration
 

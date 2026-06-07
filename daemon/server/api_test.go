@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/session"
 )
 
@@ -18,7 +20,11 @@ import (
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	mgr := session.NewSessionManager("pwsh", 102400)
-	srv := NewServer(mgr)
+	prefsStore, err := prefs.NewStoreWithPath(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatalf("failed to create prefs store: %v", err)
+	}
+	srv := NewServer(mgr, prefsStore)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
 		ts.Close()
@@ -495,5 +501,79 @@ func TestWebSocket_NotFound(t *testing.T) {
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Preferences endpoints
+// ---------------------------------------------------------------------------
+
+func TestPreferences_DefaultEmpty(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/api/preferences")
+	if err != nil {
+		t.Fatalf("GET /api/preferences failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var body prefs.Preferences
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode preferences: %v", err)
+	}
+	if body.PanelClose != "" || body.WorkspaceClose != "" {
+		t.Errorf("expected empty default preferences, got %+v", body)
+	}
+}
+
+func TestPreferences_PutThenGet(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/preferences",
+		strings.NewReader(`{"panel_close":"kill","workspace_close":"detach"}`))
+	req.Header.Set("Content-Type", "application/json")
+	putResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /api/preferences failed: %v", err)
+	}
+	putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 on PUT, got %d", putResp.StatusCode)
+	}
+
+	getResp, err := http.Get(ts.URL + "/api/preferences")
+	if err != nil {
+		t.Fatalf("GET /api/preferences failed: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	var body prefs.Preferences
+	if err := json.NewDecoder(getResp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode preferences: %v", err)
+	}
+	want := prefs.Preferences{PanelClose: "kill", WorkspaceClose: "detach"}
+	if body != want {
+		t.Errorf("GET after PUT: got %+v, want %+v", body, want)
+	}
+}
+
+func TestPreferences_PutInvalidValue(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/preferences",
+		strings.NewReader(`{"panel_close":"explode"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /api/preferences failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected status 400 for invalid value, got %d", resp.StatusCode)
 	}
 }

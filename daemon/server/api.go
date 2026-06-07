@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/session"
 )
 
@@ -362,6 +363,46 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Preferences endpoints
+// ---------------------------------------------------------------------------
+
+// handleGetPreferences returns the current app-managed user preferences.
+func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handleGetPreferences: retrieving preferences")
+	writeJSON(w, http.StatusOK, s.prefs.Get())
+}
+
+// handlePutPreferences validates and persists the given preferences, then
+// echoes the stored value back.
+func (s *Server) handlePutPreferences(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handlePutPreferences: processing preferences save")
+
+	var p prefs.Preferences
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		slog.Warn("server.handlePutPreferences: invalid request body",
+			slog.String("error", err.Error()),
+		)
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.prefs.Set(p); err != nil {
+		slog.Warn("server.handlePutPreferences: rejected preferences",
+			slog.String("error", err.Error()),
+		)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	slog.Info("server.handlePutPreferences: preferences saved",
+		slog.String("panel_close", p.PanelClose),
+		slog.String("workspace_close", p.WorkspaceClose),
+	)
+
+	writeJSON(w, http.StatusOK, p)
 }
 
 // ---------------------------------------------------------------------------

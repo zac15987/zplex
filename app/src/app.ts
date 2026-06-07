@@ -19,6 +19,7 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   ClosePreference,
+  ClosePreferences,
   CloseDialogResult,
   LayoutState,
   WorkspaceInfo,
@@ -33,8 +34,11 @@ const DEFAULT_DAEMON_PORT = 17732;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const DEFAULT_WORKSPACE_ID = "default";
-const PANEL_CLOSE_PREF_KEY = "zplex:panelClosePreference";
-const WORKSPACE_CLOSE_PREF_KEY = "zplex:workspaceClosePreference";
+
+// Close preferences are owned by the daemon (GET/PUT /api/preferences). They
+// are loaded once at startup into this cache so the close flow can read them
+// synchronously; writes update the cache and PUT the full object back.
+let closePrefs: ClosePreferences = { panel_close: "", workspace_close: "" };
 
 // ---------------------------------------------------------------------------
 // Workspace-scoped session registry
@@ -373,6 +377,37 @@ async function executeClose(sessionId: string, action: ClosePreference): Promise
 }
 
 /**
+ * Load persisted close preferences from the daemon into the module cache.
+ * On failure the cache keeps its zero values (behaves as "no remembered
+ * choice") and startup is not blocked.
+ */
+async function loadClosePreferences(): Promise<void> {
+  try {
+    closePrefs = await apiGet<ClosePreferences>("/api/preferences");
+  } catch (err: unknown) {
+    console.warn("[app] failed to load close preferences:", err);
+  }
+}
+
+/**
+ * Update one close preference, persisting the full object to the daemon.
+ * The local cache is updated only after a successful PUT so it stays in
+ * sync with the daemon's stored state.
+ */
+async function saveClosePreference(
+  key: keyof ClosePreferences,
+  action: ClosePreference,
+): Promise<void> {
+  const next: ClosePreferences = { ...closePrefs, [key]: action };
+  try {
+    await apiPut("/api/preferences", next);
+    closePrefs = next;
+  } catch (err: unknown) {
+    console.error("[app] failed to save close preference:", key, err);
+  }
+}
+
+/**
  * Initiate the close flow for a panel.
  *
  * If a saved preference exists and forceDialog is false, skip the dialog.
@@ -382,7 +417,7 @@ async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<
   console.warn("[app] closePanelFlow entry:", sessionId, "forceDialog:", forceDialog);
 
   // Read saved preference once for both skip-dialog and pre-select paths
-  const saved = localStorage.getItem(PANEL_CLOSE_PREF_KEY) as ClosePreference | null;
+  const saved = closePrefs.panel_close;
   const validSaved = (saved === "detach" || saved === "kill") ? saved : undefined;
 
   // Use saved preference directly if not forcing dialog (AC-9)
@@ -401,7 +436,7 @@ async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<
 
   // Save preference if requested (AC-9)
   if (result.remember) {
-    localStorage.setItem(PANEL_CLOSE_PREF_KEY, result.action);
+    await saveClosePreference("panel_close", result.action);
     console.warn("[app] close preference saved:", result.action);
   }
 
@@ -537,7 +572,7 @@ async function handleWorkspaceClose(workspaceId: string): Promise<void> {
 
   // If there are running sessions, show close dialog
   if (runningSessions.length > 0) {
-    const saved = localStorage.getItem(WORKSPACE_CLOSE_PREF_KEY) as ClosePreference | null;
+    const saved = closePrefs.workspace_close;
     const validSaved = (saved === "detach" || saved === "kill") ? saved : undefined;
 
     let action: ClosePreference = "detach";
@@ -565,7 +600,7 @@ async function handleWorkspaceClose(workspaceId: string): Promise<void> {
       }
 
       if (result.remember) {
-        localStorage.setItem(WORKSPACE_CLOSE_PREF_KEY, result.action);
+        await saveClosePreference("workspace_close", result.action);
       }
       action = result.action;
     }
@@ -749,6 +784,9 @@ async function init(): Promise<void> {
       }
     }
   });
+
+  // Load persisted close preferences from the daemon before any close flow.
+  await loadClosePreferences();
 
   // Fetch workspace list from daemon
   let workspaceIds: string[] = [];
