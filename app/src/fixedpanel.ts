@@ -244,8 +244,9 @@ export class FixedPanel {
     this.wrapper?.dispose();
     this.wrapper = null;
 
+    // mountTerminal creates a fresh wrapper; TerminalWrapper.mount() performs
+    // the initial fit and installs a ResizeObserver, so no explicit fit here.
     this.mountTerminal(data.id);
-    this.wrapper?.fit();
   }
 
   /**
