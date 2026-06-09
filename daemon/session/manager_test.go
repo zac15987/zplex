@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +111,7 @@ func TestRingBuffer_EmptyWrite(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionCreate_PTYIO(t *testing.T) {
-	sess, err := NewSession("test-io", "test IO session", "pwsh", 102400)
+	sess, err := NewSession("test-io", "test IO session", "pwsh", nil, "", nil, "", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestSessionCreate_PTYIO(t *testing.T) {
 }
 
 func TestSessionInfo(t *testing.T) {
-	sess, err := NewSession("test-info", "info test", "pwsh", 102400)
+	sess, err := NewSession("test-info", "info test", "pwsh", nil, "", nil, "", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestSessionInfo(t *testing.T) {
 func TestSession_NaturalExit(t *testing.T) {
 	// Test that when the shell exits naturally (via "exit" command),
 	// the session detects it: Status becomes "exited" and Done() closes.
-	sess, err := NewSession("test-natural-exit", "natural exit test", "pwsh", 102400)
+	sess, err := NewSession("test-natural-exit", "natural exit test", "pwsh", nil, "", nil, "", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestSession_NaturalExit(t *testing.T) {
 func TestSession_CloseSignalsDone(t *testing.T) {
 	// Test that Close() terminates the subprocess, closes the Done
 	// channel, and transitions Status to "exited".
-	sess, err := NewSession("test-close-done", "close done test", "cmd.exe", 102400)
+	sess, err := NewSession("test-close-done", "close done test", "cmd.exe", nil, "", nil, "", 102400)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -377,5 +378,89 @@ func TestManager_Shutdown(t *testing.T) {
 	infos = mgr.List()
 	if len(infos) != 0 {
 		t.Errorf("expected 0 sessions after shutdown, got %d", len(infos))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateSession with Cwd, Args, Kind — AC-3 coverage.
+// ---------------------------------------------------------------------------
+
+func TestCreateSession_WithCwdArgsKind(t *testing.T) {
+	mgr := NewSessionManager("pwsh", 102400)
+	defer mgr.Shutdown()
+
+	// Resolve the full path to pwsh so that go-pty on Windows does not try to
+	// look it up relative to Cwd (Windows CreateProcess quirk replicated by the
+	// go-pty library when Dir is set).
+	pwshPath, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skipf("pwsh not found in PATH, skipping: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+
+	sess, err := mgr.CreateSession(CreateOptions{
+		Shell: pwshPath,
+		Title: "fixed-test",
+		Cwd:   tmpDir,
+		Args:  []string{"-NoLogo"},
+		Kind:  "fixed",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	info := sess.Info()
+	if info.PID <= 0 {
+		t.Errorf("expected PID > 0, got %d", info.PID)
+	}
+	if info.Kind != "fixed" {
+		t.Errorf("expected Kind %q, got %q", "fixed", info.Kind)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// FixedSession helper — AC-5 coverage.
+// ---------------------------------------------------------------------------
+
+func TestFixedSession_Helper(t *testing.T) {
+	// A fresh manager with no sessions should return ok==false.
+	emptyMgr := NewSessionManager("pwsh", 102400)
+	defer emptyMgr.Shutdown()
+
+	if _, ok := emptyMgr.FixedSession(); ok {
+		t.Error("expected FixedSession to return ok==false on empty manager")
+	}
+
+	// A manager with one normal session and one fixed session.
+	mgr := NewSessionManager("pwsh", 102400)
+	defer mgr.Shutdown()
+
+	// Create a normal (non-fixed) session.
+	_, err := mgr.CreateSession(CreateOptions{
+		Shell: "pwsh",
+		Title: "normal-session",
+		Kind:  "",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (normal) failed: %v", err)
+	}
+
+	// Create a fixed session.
+	fixedSess, err := mgr.CreateSession(CreateOptions{
+		Shell: "pwsh",
+		Title: "fixed-session",
+		Kind:  "fixed",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession (fixed) failed: %v", err)
+	}
+
+	got, ok := mgr.FixedSession()
+	if !ok {
+		t.Fatal("expected FixedSession to return ok==true")
+	}
+	if got.ID != fixedSess.ID {
+		t.Errorf("expected FixedSession ID %q, got %q", fixedSess.ID, got.ID)
 	}
 }

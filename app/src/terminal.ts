@@ -33,6 +33,7 @@ export class TerminalWrapper {
   private resizeObserver: ResizeObserver | null = null;
   private onFocusCallback: ((sessionId: string) => void) | null = null;
   private onDisposeCallback: ((sessionId: string) => void) | null = null;
+  private onExitCallback: ((code: number) => void) | null = null;
 
   constructor(sessionId: string, daemonPort: number) {
     this.sessionId = sessionId;
@@ -61,6 +62,11 @@ export class TerminalWrapper {
   /** Register a callback invoked when the terminal is disposed. */
   onDispose(callback: (sessionId: string) => void): void {
     this.onDisposeCallback = callback;
+  }
+
+  /** Register a callback invoked when the session's process exits (WS "exit"). */
+  onExit(callback: (code: number) => void): void {
+    this.onExitCallback = callback;
   }
 
   /** Trigger a re-fit of the terminal to its container dimensions. */
@@ -200,6 +206,9 @@ export class TerminalWrapper {
             "code:",
             msg.code,
           );
+          if (this.onExitCallback) {
+            this.onExitCallback(msg.code);
+          }
           break;
       }
     };

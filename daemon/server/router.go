@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zac15987/zplex/daemon/config"
 	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/session"
 )
@@ -30,15 +31,16 @@ type Server struct {
 	mgr       *session.SessionManager
 	startTime time.Time
 	version   string
-	layoutMu sync.Mutex
-	layouts  map[string]layoutState // key = workspace ID
-	prefs    *prefs.Store
+	layoutMu  sync.Mutex
+	layouts   map[string]layoutState // key = workspace ID
+	prefs     *prefs.Store
+	zpitCfg   config.ZpitConfig
 }
 
-// NewServer creates a Server wired to the given session manager and
-// preferences store. The returned Server exposes a Handler() method that
-// produces a fully-configured http.Handler (mux + middleware).
-func NewServer(mgr *session.SessionManager, prefsStore *prefs.Store) *Server {
+// NewServer creates a Server wired to the given session manager, preferences
+// store, and zpit configuration. The returned Server exposes a Handler() method
+// that produces a fully-configured http.Handler (mux + middleware).
+func NewServer(mgr *session.SessionManager, prefsStore *prefs.Store, zpitCfg config.ZpitConfig) *Server {
 	slog.Info("server.NewServer: initializing HTTP server")
 	return &Server{
 		mgr:       mgr,
@@ -46,6 +48,7 @@ func NewServer(mgr *session.SessionManager, prefsStore *prefs.Store) *Server {
 		version:   "0.1.0",
 		layouts:   make(map[string]layoutState),
 		prefs:     prefsStore,
+		zpitCfg:   zpitCfg,
 	}
 }
 
@@ -69,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/preferences", s.handleGetPreferences)
 	mux.HandleFunc("PUT /api/preferences", s.handlePutPreferences)
+
+	mux.HandleFunc("POST /api/zpit/restart", s.handleRestartZpit)
 
 	mux.HandleFunc("GET /ws/{session_id}", s.handleWebSocket)
 

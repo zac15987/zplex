@@ -16,6 +16,7 @@ export interface SessionInfo {
   id: string;
   title: string;
   status: string; // "running" | "exited"
+  kind: string; // "" = normal/agent session, "fixed" = zpit cockpit
   created_at: string; // ISO 8601 timestamp
   pid: number;
   exit_code: number;
@@ -42,6 +43,16 @@ export interface HealthResponse {
   uptime: number;
   sessions: number;
 }
+
+// ---------------------------------------------------------------------------
+// Fixed panel UI state — localStorage keys and defaults (AC-13)
+// ---------------------------------------------------------------------------
+
+/** localStorage key for the persisted fixed-panel width ratio (AC-13). */
+export const FIXED_PANEL_RATIO_KEY = "zplex:fixedPanelRatio";
+
+/** Default fixed-panel width fraction when no value is persisted (AC-13). */
+export const DEFAULT_FIXED_PANEL_RATIO = 0.35;
 
 // ---------------------------------------------------------------------------
 // WebSocket message types (server/ws.go)

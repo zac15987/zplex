@@ -14,8 +14,14 @@
     <button id="tab-bar-add" title="New workspace (Ctrl+Shift+T)">+</button>
   </div>
 
-  <!-- Grid container: panels and gutters are inserted dynamically by layout.ts -->
-  <div id="grid-container"></div>
+  <!-- Terminal area: fixed zpit cockpit (left) + draggable splitter + dynamic grid (right). -->
+  <!-- #main-split starts with class "no-fixed"; app.ts removes it once a fixed zpit session is mounted. -->
+  <div id="main-split" class="no-fixed">
+    <div id="fixed-panel-area"></div>
+    <div id="v-splitter"></div>
+    <!-- Grid container: panels and gutters are inserted dynamically by layout.ts -->
+    <div id="grid-container"></div>
+  </div>
 
   <!-- Add panel button (AC-13) -->
   <button id="add-panel-btn" title="New panel (Ctrl+Shift+N)">+</button>

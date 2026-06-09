@@ -106,6 +106,17 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 - **Active workspace persistence**: Current workspace ID stored in `localStorage` key `zplex:activeWorkspace` (pure UI state — kept in the frontend). Restored on app restart.
 - **Close workspace**: Shows confirmation dialog if workspace has running sessions. The remembered detach/kill choice for both panel close and workspace close is owned by the daemon and persisted to `~/.zplex/preferences.json` via `GET/PUT /api/preferences` (loaded once at startup into a frontend cache). Last workspace cannot be closed.
 
+### Fixed zpit Cockpit Panel
+
+The terminal area is wrapped in `#main-split` = `[#fixed-panel-area] [#v-splitter] [#grid-container]`. The zpit cockpit terminal mounts into `#fixed-panel-area` and is never part of `PanelGrid` — auto-tile, gutter resize, focus navigation, and layout persistence are entirely untouched.
+
+Key behaviors:
+
+- **Global persistence**: the fixed panel is created once at init and survives workspace switch and workspace close — it is visible in every workspace.
+- **Exit overlay**: when zpit exits, the fixed panel shows a `zpit exited` overlay with a manual `Restart` button. There is NO auto-restart.
+- **Graceful fallback**: when `[zpit].enabled` is false or the binary is missing, the daemon creates no fixed session and the frontend falls back to the pure dynamic grid (M2 behavior). `#main-split` carries class `no-fixed`, which hides `#fixed-panel-area` and `#v-splitter`.
+- **Split ratio**: the fixed/dynamic split ratio is pure UI state stored in `localStorage` key `zplex:fixedPanelRatio` (default `0.35`). It is NOT in daemon preferences.
+
 ### Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -113,7 +124,7 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 | `Ctrl+Shift+N` | Create new terminal panel |
 | `Ctrl+Shift+T` | Create new workspace tab |
 | `Ctrl+Shift+W` | Close focused panel (shows dialog or uses saved preference) |
-| `Ctrl+Shift+Arrow` | Move focus to adjacent panel (Up/Down/Left/Right) |
+| `Ctrl+Shift+Arrow` | Move focus to adjacent panel (Up/Down/Left/Right); `Ctrl+Shift+Left` from the leftmost grid panel crosses into the zpit fixed panel, and `Ctrl+Shift+Right` from the zpit fixed panel crosses back to the leftmost grid panel |
 | `Ctrl+Shift+PageUp` | Switch to previous workspace (wraps around) |
 | `Ctrl+Shift+PageDown` | Switch to next workspace (wraps around) |
 | `Shift+Click [×]` | Force close dialog (override saved preference) |
@@ -124,17 +135,22 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 |--------|------|---------|
 | GET | `/api/health` | Health check + version |
 | GET/POST | `/api/sessions` | List / create sessions |
-| GET/DELETE/PATCH | `/api/sessions/{id}` | Get / kill / update session |
+| GET/DELETE/PATCH | `/api/sessions/{id}` | Get / kill / update session; DELETE returns HTTP 403 for the fixed (`kind=="fixed"`) session — it cannot be killed from the UI |
 | GET/PUT | `/api/layout` | Get / save panel layout (per workspace) |
 | GET | `/api/workspaces` | List workspace IDs with layout data |
 | DELETE | `/api/workspaces/{id}` | Delete workspace layout data |
 | GET/PUT | `/api/preferences` | Get / save app-managed user preferences (close behavior), persisted to `~/.zplex/preferences.json` |
 | GET | `/api/events` | SSE stream for real-time updates |
+| POST | `/api/zpit/restart` | Kill (if running) and relaunch the fixed zpit session |
 
 ### WebSocket Protocol (`/ws/{session_id}`)
 
 - Client→Server: `{ type: "input", data: "..." }` or `{ type: "resize", cols: N, rows: N }`
 - Server→Client: `{ type: "output", data: "..." }` or `{ type: "exit", code: N }`
+
+### SessionInfo `kind` field
+
+`SessionInfo` (and `Session`) carry a `kind` field in all `GET /api/sessions` and `GET /api/sessions/{id}` responses: `""` for normal/agent sessions, `"fixed"` for the zpit cockpit session.
 
 ## Tech Stack Constraints
 
@@ -161,7 +177,18 @@ The frontend supports multiple workspaces, each with its own set of terminal pan
 
 ## Configuration
 
-zplex config lives at `~/.zplex/config.toml`. Key sections: `[daemon]` (port, default_shell, buffer_size), `[zpit]` (auto-create fixed panel), `[electron]` (tray behavior, daemon lifecycle), `[appearance]` (theme, font). This file is **read-only** to the daemon (loaded once at startup; user hand-edited).
+zplex config lives at `~/.zplex/config.toml`. Key sections: `[daemon]` (port, default_shell, buffer_size), `[zpit]` (see below), `[electron]` (tray behavior, daemon lifecycle), `[appearance]` (theme, font). This file is **read-only** to the daemon (loaded once at startup; user hand-edited).
+
+**`[zpit]` section keys:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `true` | Auto-launch the cockpit fixed panel on daemon startup |
+| `bin` | string | `"zpit"` | Binary name or path; resolved via PATH when not absolute |
+| `config` | string | `""` | Optional path injected as the `ZPIT_CONFIG` env var; omitted when empty |
+| `args` | string array | `[]` | Extra arguments passed to the binary |
+
+The daemon does NOT parse zpit's own TOML — it only spawns the binary and optionally sets `ZPIT_CONFIG`.
 
 App-managed mutable preferences (currently close behavior) live separately in `~/.zplex/preferences.json`, owned by the daemon's `prefs` package and read/written at runtime via `GET/PUT /api/preferences`. Kept apart from `config.toml` so runtime writes never clobber the user's hand-edited TOML.
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/zac15987/zplex/daemon/prefs"
@@ -86,9 +87,9 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 type createSessionRequest struct {
 	Shell string   `json:"shell"`
 	Title string   `json:"title"`
-	Args  []string `json:"args,omitempty"` // reserved for future use
-	Cwd   string   `json:"cwd,omitempty"`  // reserved for future use
-	Env   []string `json:"env,omitempty"`  // reserved for future use
+	Args  []string `json:"args,omitempty"`
+	Cwd   string   `json:"cwd,omitempty"`
+	Env   []string `json:"env,omitempty"`
 	Cols  int      `json:"cols"`
 	Rows  int      `json:"rows"`
 }
@@ -129,6 +130,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Title: req.Title,
 		Cols:  req.Cols,
 		Rows:  req.Rows,
+		Args:  req.Args,
+		Cwd:   req.Cwd,
+		Env:   req.Env,
 	})
 	if err != nil {
 		slog.Error("server.handleCreateSession: failed to create session",
@@ -173,11 +177,31 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteSession kills a session and removes it from the manager.
+// Sessions with Kind=="fixed" are protected and cannot be deleted via this
+// endpoint — they return HTTP 403 to prevent accidental removal.
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	slog.Info("server.handleDeleteSession: deleting session",
 		slog.String("session_id", id),
 	)
+
+	sess, err := s.mgr.Get(id)
+	if err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get session")
+		return
+	}
+
+	if sess.Info().Kind == "fixed" {
+		slog.Warn("server.handleDeleteSession: refusing to delete fixed session",
+			slog.String("session_id", id),
+		)
+		writeError(w, http.StatusForbidden, "cannot delete fixed session")
+		return
+	}
 
 	if err := s.mgr.Kill(id); err != nil {
 		if errors.Is(err, session.ErrSessionNotFound) {
@@ -238,6 +262,78 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusOK, sess.Info())
+}
+
+// ---------------------------------------------------------------------------
+// zpit integration
+// ---------------------------------------------------------------------------
+
+// LaunchZpit creates the single fixed zpit session via the session manager.
+// Env is set only when a custom ZPIT_CONFIG path is configured; otherwise the
+// child inherits the daemon's environment. Returns the created session or an
+// error if the zpit binary cannot start.
+func (s *Server) LaunchZpit() (*session.Session, error) {
+	slog.Info("server.LaunchZpit: launching zpit fixed session")
+
+	var env []string
+	if s.zpitCfg.Config != "" {
+		env = append(os.Environ(), "ZPIT_CONFIG="+s.zpitCfg.Config)
+	}
+
+	sess, err := s.mgr.CreateSession(session.CreateOptions{
+		Shell: s.zpitCfg.Bin,
+		Title: "zpit",
+		Kind:  "fixed",
+		Args:  s.zpitCfg.Args,
+		Env:   env,
+	})
+	if err != nil {
+		slog.Error("server.LaunchZpit: failed to launch zpit",
+			slog.String("error", err.Error()),
+		)
+		return nil, err
+	}
+
+	slog.Info("server.LaunchZpit: zpit fixed session launched",
+		slog.String("session_id", sess.ID),
+	)
+	return sess, nil
+}
+
+// handleRestartZpit handles POST /api/zpit/restart. It tears down any existing
+// fixed session and re-launches zpit, returning the new session's ID and WS URL.
+func (s *Server) handleRestartZpit(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handleRestartZpit: processing zpit restart request")
+
+	if !s.zpitCfg.Enabled {
+		writeError(w, http.StatusConflict, "zpit is disabled")
+		return
+	}
+
+	if existing, ok := s.mgr.FixedSession(); ok {
+		if err := s.mgr.Kill(existing.ID); err != nil {
+			slog.Warn("server.handleRestartZpit: failed to kill existing fixed session",
+				slog.String("session_id", existing.ID),
+				slog.String("error", err.Error()),
+			)
+			// Non-fatal: continue to launch a new session.
+		}
+	}
+
+	sess, err := s.LaunchZpit()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to launch zpit")
+		return
+	}
+
+	slog.Info("server.handleRestartZpit: zpit restarted",
+		slog.String("session_id", sess.ID),
+	)
+
+	writeJSON(w, http.StatusCreated, createSessionResponse{
+		ID:    sess.ID,
+		WsURL: "/ws/" + sess.ID,
+	})
 }
 
 // ---------------------------------------------------------------------------

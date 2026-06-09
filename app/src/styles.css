@@ -151,15 +151,94 @@ html, body {
   color: #d4d4d4;
 }
 
+/* --- Main split (fixed cockpit + dynamic grid) --- */
+
+#main-split {
+  display: flex;
+  flex-direction: row;
+  width: 100vw;
+  height: calc(100vh - 33px); /* 32px tab bar + 1px border */
+  overflow: hidden;
+}
+
+/* Left cockpit — width set inline by fixedpanel.ts; must not shrink */
+#fixed-panel-area {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  overflow: hidden;
+}
+
+/* Draggable vertical divider */
+#v-splitter {
+  flex: 0 0 4px;
+  cursor: col-resize;
+  background-color: var(--gutter-color);
+}
+
+#v-splitter:hover,
+#v-splitter.dragging {
+  background-color: var(--gutter-hover-color);
+}
+
+/* Hide fixed area and splitter when no zpit session; grid fills full width */
+#main-split.no-fixed #fixed-panel-area,
+#main-split.no-fixed #v-splitter {
+  display: none;
+}
+
+/* Inner fixed panel fills the area */
+#fixed-panel-area .panel {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* AC-16: left accent border on fixed panel header (dynamic headers lack this) */
+#fixed-panel-area .panel-header {
+  border-left: 3px solid #4ec9b0;
+}
+
 /* --- Grid Container --- */
 
 #grid-container {
   display: grid;
-  width: 100vw;
-  height: calc(100vh - 33px); /* 32px tab bar + 1px border */
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
   gap: 0;
   background-color: var(--bg-color);
   overflow: hidden;
+}
+
+/* --- Fixed Panel Exited Overlay (AC-15) --- */
+
+.fixed-exited-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  font-size: 13px;
+}
+
+.fixed-exited-overlay button {
+  padding: 4px 16px;
+  border: 1px solid #4ec9b0;
+  border-radius: 3px;
+  background: #3c3c3c;
+  color: var(--text-color);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.fixed-exited-overlay button:hover {
+  background: #4c4c4c;
 }
 
 /* --- Panel --- */

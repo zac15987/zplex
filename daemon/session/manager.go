@@ -43,7 +43,7 @@ func (m *SessionManager) Create(title string) (*Session, error) {
 
 	id := "s-" + generateID()
 
-	sess, err := NewSession(id, title, m.shell, m.bufferSize)
+	sess, err := NewSession(id, title, m.shell, nil, "", nil, "", m.bufferSize)
 	if err != nil {
 		slog.Error("manager.Create: failed to create session",
 			slog.String("title", title),
@@ -66,6 +66,10 @@ type CreateOptions struct {
 	Title string
 	Cols  int
 	Rows  int
+	Args  []string
+	Env   []string
+	Cwd   string
+	Kind  string
 }
 
 // CreateSession spawns a new PTY-backed session with the given options.
@@ -77,6 +81,7 @@ func (m *SessionManager) CreateSession(opts CreateOptions) (*Session, error) {
 		slog.String("shell", opts.Shell),
 		slog.Int("cols", opts.Cols),
 		slog.Int("rows", opts.Rows),
+		slog.String("kind", opts.Kind),
 	)
 
 	shell := opts.Shell
@@ -86,7 +91,7 @@ func (m *SessionManager) CreateSession(opts CreateOptions) (*Session, error) {
 
 	id := "s-" + generateID()
 
-	sess, err := NewSession(id, opts.Title, shell, m.bufferSize)
+	sess, err := NewSession(id, opts.Title, shell, opts.Args, opts.Cwd, opts.Env, opts.Kind, m.bufferSize)
 	if err != nil {
 		slog.Error("manager.CreateSession: failed to create session",
 			slog.String("title", opts.Title),
@@ -199,6 +204,27 @@ func (m *SessionManager) Shutdown() {
 	m.sessions = make(map[string]*Session)
 
 	slog.Info("manager.Shutdown: all sessions closed")
+}
+
+// FixedSession returns the single Kind=="fixed" session if one exists.
+// The bool is false when no fixed session is currently registered.
+func (m *SessionManager) FixedSession() (*Session, bool) {
+	slog.Info("manager.FixedSession: looking up fixed session")
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, sess := range m.sessions {
+		if sess.Kind == "fixed" {
+			slog.Info("manager.FixedSession: fixed session found",
+				slog.String("session_id", sess.ID),
+			)
+			return sess, true
+		}
+	}
+
+	slog.Info("manager.FixedSession: no fixed session found")
+	return nil, false
 }
 
 // generateID produces a 16-character hex string from 8 random bytes.

@@ -38,7 +38,17 @@ func main() {
 	}
 
 	// Build the HTTP/WebSocket server wired to the session manager.
-	srv := server.NewServer(mgr, prefsStore)
+	srv := server.NewServer(mgr, prefsStore, cfg.Zpit)
+
+	// Auto-launch the fixed zpit cockpit session when enabled. A failure here
+	// (e.g. zpit binary not on PATH) must not bring down the daemon.
+	if cfg.Zpit.Enabled {
+		if _, err := srv.LaunchZpit(); err != nil {
+			slog.Warn("zpit auto-launch failed", slog.String("error", err.Error()))
+		} else {
+			slog.Info("zpit fixed session auto-launched")
+		}
+	}
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),

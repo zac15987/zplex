@@ -10,27 +10,36 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/zac15987/zplex/daemon/config"
 	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/session"
 )
 
-// newTestServer creates a Server backed by a real SessionManager for
-// integration testing. The test server and manager are torn down
-// automatically when the test finishes.
-func newTestServer(t *testing.T) (*Server, *httptest.Server) {
+// newTestServerWithZpit creates a Server backed by a real SessionManager for
+// integration testing, using the given ZpitConfig. The test server and manager
+// are torn down automatically when the test finishes.
+func newTestServerWithZpit(t *testing.T, zpitCfg config.ZpitConfig) (*Server, *httptest.Server) {
 	t.Helper()
 	mgr := session.NewSessionManager("pwsh", 102400)
 	prefsStore, err := prefs.NewStoreWithPath(filepath.Join(t.TempDir(), "preferences.json"))
 	if err != nil {
 		t.Fatalf("failed to create prefs store: %v", err)
 	}
-	srv := NewServer(mgr, prefsStore)
+	srv := NewServer(mgr, prefsStore, zpitCfg)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
 		ts.Close()
 		mgr.Shutdown()
 	})
 	return srv, ts
+}
+
+// newTestServer creates a Server backed by a real SessionManager for
+// integration testing. The test server and manager are torn down
+// automatically when the test finishes.
+func newTestServer(t *testing.T) (*Server, *httptest.Server) {
+	t.Helper()
+	return newTestServerWithZpit(t, config.ZpitConfig{Enabled: true, Bin: "pwsh"})
 }
 
 // wsURL converts an httptest.Server URL to a WebSocket URL for the given path.
@@ -326,6 +335,130 @@ func TestDeleteSession_NotFound(t *testing.T) {
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", resp.StatusCode)
+	}
+}
+
+// TestDeleteSession_FixedProtected verifies that DELETE on a fixed session
+// returns HTTP 403 with the exact error body and leaves the session intact.
+func TestDeleteSession_FixedProtected(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	sess, err := srv.LaunchZpit()
+	if err != nil {
+		t.Fatalf("LaunchZpit failed: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/sessions/"+sess.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to create DELETE request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /api/sessions/%s failed: %v", sess.ID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected status 403, got %d", resp.StatusCode)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Error != "cannot delete fixed session" {
+		t.Errorf("expected error %q, got %q", "cannot delete fixed session", errResp.Error)
+	}
+
+	// Verify the fixed session is still listed with status "running".
+	getResp, err := http.Get(ts.URL + "/api/sessions")
+	if err != nil {
+		t.Fatalf("GET /api/sessions failed: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	var infos []session.SessionInfo
+	if err := json.NewDecoder(getResp.Body).Decode(&infos); err != nil {
+		t.Fatalf("failed to decode sessions list: %v", err)
+	}
+
+	found := false
+	for _, info := range infos {
+		if info.ID == sess.ID {
+			found = true
+			if info.Status != "running" {
+				t.Errorf("fixed session status: expected %q, got %q", "running", info.Status)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("fixed session %q not found in session list after attempted delete", sess.ID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// zpit restart endpoint
+// ---------------------------------------------------------------------------
+
+// TestRestartZpit_Disabled verifies that POST /api/zpit/restart returns
+// HTTP 409 with the appropriate error body when zpit is disabled.
+func TestRestartZpit_Disabled(t *testing.T) {
+	_, ts := newTestServerWithZpit(t, config.ZpitConfig{Enabled: false})
+
+	resp, err := http.Post(ts.URL+"/api/zpit/restart", "application/json", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("POST /api/zpit/restart failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("expected status 409, got %d", resp.StatusCode)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Error != "zpit is disabled" {
+		t.Errorf("expected error %q, got %q", "zpit is disabled", errResp.Error)
+	}
+}
+
+// TestRestartZpit_Success verifies that POST /api/zpit/restart returns
+// HTTP 201 with a new session ID that differs from the previously launched one.
+func TestRestartZpit_Success(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	oldSess, err := srv.LaunchZpit()
+	if err != nil {
+		t.Fatalf("initial LaunchZpit failed: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/zpit/restart", "application/json", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("POST /api/zpit/restart failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", resp.StatusCode)
+	}
+
+	var result createSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode restart response: %v", err)
+	}
+
+	if result.ID == "" {
+		t.Error("expected non-empty session ID in restart response")
+	}
+	if result.ID == oldSess.ID {
+		t.Errorf("expected new session ID to differ from old %q, but got same ID", oldSess.ID)
+	}
+	if !strings.HasPrefix(result.WsURL, "/ws/") {
+		t.Errorf("expected ws_url to start with /ws/, got %q", result.WsURL)
 	}
 }
 

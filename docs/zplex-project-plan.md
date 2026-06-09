@@ -206,9 +206,9 @@ zplex/
 
 ## 5. Milestones
 
-> **Progress (2026-04-12):** M1 and M2 complete — all six issues (#1, #2, #5, #7, #8, #11) are merged and closed. The Go daemon is functional (session CRUD, PTY/ConPTY, REST API, WebSocket I/O relay, ring buffer replay, per-workspace layout persistence) and the Electron app has multi-panel auto-tiled CSS Grid layout, draggable gutter resize, keyboard navigation, close confirmation dialogs, layout restore reconciliation, and workspace tabs with dispose/recreate switching. M3 is next.
+> **Progress (2026-06-09):** M1, M2, and M3 complete. M3 (issue #13) delivered the always-visible zpit cockpit: the daemon auto-launches a fixed `kind="fixed"` session on startup (configurable via `[zpit]`), protects it from deletion (DELETE → 403) with a `POST /api/zpit/restart` endpoint, and the frontend mounts it in a persistent `#main-split` fixed panel (draggable splitter, exited+Restart overlay, graceful fallback when zpit is absent). M4 (zpit launcher integration) is next.
 >
-> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. The original M2 "multi-panel layout" and "panel resize + keyboard navigation" items were combined into a single issue #7. Remaining issues use TBD as they haven't been filed on GitHub yet.
+> Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. The original M2 "multi-panel layout" and "panel resize + keyboard navigation" items were combined into a single issue #7. M3's two planned items were combined into a single issue #13.
 
 ### M1: Skeleton — single terminal works end-to-end
 
@@ -253,8 +253,8 @@ zplex/
 
 | Issue | Title | Description | Status | Depends |
 |---|---|---|---|---|
-| TBD | Daemon: auto-create zpit session on startup | Read zpit config location (env `ZPIT_CONFIG` or `~/.zpit/config.toml`). On daemon start, create a special session running `zpit` binary. Mark as "fixed" (cannot be killed from UI) | Planned | M2 |
-| TBD | Frontend: fixed panel vs dynamic panels | Left panel always shows zpit session (not closable, distinct border/header). Right area is dynamic panel grid for agents. Layout: `[fixed 35%] [dynamic 65%]` adjustable | Planned | zpit session |
+| #13 | Daemon: auto-create zpit session on startup | Read zpit config location (env `ZPIT_CONFIG` or `~/.zpit/config.toml`). On daemon start, create a special session running `zpit` binary. Mark as "fixed" (cannot be killed from UI) | ✅ Done | M2 |
+| #13 | Frontend: fixed panel vs dynamic panels | Left panel always shows zpit session (not closable, distinct border/header). Right area is dynamic panel grid for agents. Layout: `[fixed 35%] [dynamic 65%]` adjustable | ✅ Done | zpit session |
 
 **Demo scenario after M3:**
 1. Open zplex → left panel shows zpit TUI, right area is empty
