@@ -9,6 +9,9 @@
   --gutter-size: 4px;
   --gutter-color: #333;
   --gutter-hover-color: #007acc;
+  --agent-active: #3fb950;
+  --agent-waiting: #d29922;
+  --agent-done: #6e7681;
 }
 
 * {
@@ -255,6 +258,40 @@ html, body {
 
 .panel.focused {
   border-color: var(--panel-focus-border-color);
+}
+
+/* Agent state: status indicator dot in panel header */
+
+.panel-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.panel[data-agent-state="active"] .panel-status {
+  background-color: var(--agent-active);
+}
+
+.panel[data-agent-state="waiting"] .panel-status {
+  background-color: var(--agent-waiting);
+}
+
+.panel[data-agent-state="done"] .panel-status {
+  background-color: var(--agent-done);
+}
+
+/* Agent waiting: pulsing border animation */
+
+@keyframes agent-waiting-pulse {
+  0%   { border-color: var(--panel-border-color); }
+  50%  { border-color: var(--agent-waiting); }
+  100% { border-color: var(--panel-border-color); }
+}
+
+.panel[data-agent-state="waiting"] {
+  animation: agent-waiting-pulse 1.5s ease-in-out infinite;
 }
 
 /* --- Panel Header --- */
