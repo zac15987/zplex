@@ -448,6 +448,43 @@ async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// Session-mounted guard and closed-panel removal
+// ---------------------------------------------------------------------------
+
+/** Return true if the session is mounted in any workspace's registry. */
+function isSessionMountedAnywhere(sessionId: string): boolean {
+  for (const [, registry] of workspaces) {
+    if (registry.has(sessionId)) return true;
+  }
+  return false;
+}
+
+/**
+ * Remove a panel that the daemon has already closed. Disposes the terminal
+ * and removes the panel from the grid WITHOUT issuing DELETE /api/sessions
+ * (the session is already gone). Searches all workspace registries.
+ */
+function removeClosedPanel(sessionId: string): void {
+  let found = false;
+  for (const [, registry] of workspaces) {
+    const wrapper = registry.get(sessionId);
+    if (wrapper) {
+      wrapper.dispose();
+      registry.delete(sessionId);
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    console.warn("[app] session.closed: panel not mounted, ignoring:", sessionId);
+    return;
+  }
+  panelGrid?.removePanel(sessionId);
+  refitAllTerminals();
+  console.warn("[app] session.closed: removed panel:", sessionId);
+}
+
+// ---------------------------------------------------------------------------
 // Focus navigation
 // ---------------------------------------------------------------------------
 
@@ -500,6 +537,100 @@ function moveFocus(direction: "up" | "down" | "left" | "right"): void {
   const adjacentId = panelGrid.getAdjacentPanelId(currentId, direction);
   if (!adjacentId) return;
   focusGridPanel(adjacentId);
+}
+
+// ---------------------------------------------------------------------------
+// Waiting-panel jump (Ctrl+Shift+J)
+// ---------------------------------------------------------------------------
+
+/**
+ * Move focus to the next panel whose agentState === "waiting", in grid order
+ * (PanelGrid.getPanelIds()), wrapping around. If the currently focused panel
+ * is waiting, focus advances to the NEXT waiting panel. No-op (warn) if none.
+ */
+function jumpToNextWaitingPanel(): void {
+  if (!panelGrid) return;
+  const ids = panelGrid.getPanelIds();
+  if (ids.length === 0) {
+    console.warn("[app] Ctrl+Shift+J: no panels");
+    return;
+  }
+  const focusedId = panelGrid.getFocusedPanelId();
+  const startIdx = focusedId ? ids.indexOf(focusedId) : -1;
+  // Scan the ids in order starting AFTER the focused panel, wrapping around.
+  for (let offset = 1; offset <= ids.length; offset++) {
+    const idx = (startIdx + offset) % ids.length;
+    const id = ids[idx];
+    if (panelGrid.getPanelInfo(id)?.agentState === "waiting") {
+      focusGridPanel(id);
+      console.warn("[app] Ctrl+Shift+J: jumped to waiting panel:", id);
+      return;
+    }
+  }
+  console.warn("[app] Ctrl+Shift+J: no panel waiting for permission");
+}
+
+// ---------------------------------------------------------------------------
+// SSE event source
+// ---------------------------------------------------------------------------
+
+/**
+ * Open the SSE stream to the daemon and react to session lifecycle events:
+ *   - session.created: auto-mount a panel for a non-fixed session not already
+ *     mounted (the daemon-driven "agent auto-appears" behavior).
+ *   - session.updated: recolor the panel's agent-state indicator.
+ *   - session.closed: remove the panel if mounted (no DELETE — already gone).
+ */
+function initEventSource(): void {
+  const port = getDaemonPort();
+  const source = new EventSource(`http://localhost:${port}/api/events`);
+
+  source.addEventListener("session.created", (e: MessageEvent) => {
+    let info: SessionInfo;
+    try {
+      info = JSON.parse(e.data) as SessionInfo;
+    } catch (err: unknown) {
+      console.error("[app] session.created: bad payload:", err);
+      return;
+    }
+    // Skip the fixed zpit cockpit session (it has its own panel) and any
+    // session already mounted (e.g. one the frontend itself POSTed).
+    if (info.kind === "fixed") return;
+    if (isSessionMountedAnywhere(info.id)) return;
+    console.warn("[app] session.created: auto-mounting", info.id);
+    mountSessionToGrid(info.id, info.title);
+    // Reflect any initial agent_state on the freshly mounted panel.
+    if (info.agent_state) {
+      panelGrid?.setAgentState(info.id, info.agent_state);
+    }
+  });
+
+  source.addEventListener("session.updated", (e: MessageEvent) => {
+    let info: SessionInfo;
+    try {
+      info = JSON.parse(e.data) as SessionInfo;
+    } catch (err: unknown) {
+      console.error("[app] session.updated: bad payload:", err);
+      return;
+    }
+    panelGrid?.setAgentState(info.id, info.agent_state);
+  });
+
+  source.addEventListener("session.closed", (e: MessageEvent) => {
+    let info: SessionInfo;
+    try {
+      info = JSON.parse(e.data) as SessionInfo;
+    } catch (err: unknown) {
+      console.error("[app] session.closed: bad payload:", err);
+      return;
+    }
+    removeClosedPanel(info.id);
+  });
+
+  source.onerror = (): void => {
+    // EventSource auto-reconnects; log once at warn level.
+    console.warn("[app] EventSource error (will auto-reconnect)");
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -825,6 +956,14 @@ async function init(): Promise<void> {
         moveFocus("right");
         break;
       }
+
+      // Ctrl+Shift+J: Jump focus to next panel waiting for permission (AC-11)
+      case "J":
+      case "j": {
+        e.preventDefault();
+        jumpToNextWaitingPanel();
+        break;
+      }
     }
   });
 
@@ -976,6 +1115,11 @@ async function init(): Promise<void> {
   // Persist the final post-reconciliation layout state (with correct grid
   // template — either restored custom values or auto-tiled) in a single save.
   saveLayout();
+
+  // Open SSE stream after all locally-created/restored panels are registered
+  // so the dedup guard works for sessions that already existed before the
+  // stream opened.
+  initEventSource();
 
   console.warn("[app] init exit");
 }
