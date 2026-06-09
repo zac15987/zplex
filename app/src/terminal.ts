@@ -21,7 +21,7 @@ const THEME = {
 } as const;
 
 const FONT_FAMILY = "'Cascadia Mono NF', 'Cascadia Code', 'Consolas', monospace";
-const FONT_SIZE = 14;
+const FONT_SIZE = 16;
 
 export class TerminalWrapper {
   private readonly sessionId: string;
