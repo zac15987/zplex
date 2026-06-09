@@ -21,6 +21,13 @@ type SessionInfo struct {
 	PID       int       `json:"pid"`
 	ExitCode  int       `json:"exit_code"`
 	Kind      string    `json:"kind"`
+	// Identity fields — immutable, set at creation.
+	Source    string `json:"source"`
+	ProjectID string `json:"project_id"`
+	IssueID   string `json:"issue_id"`
+	Role      string `json:"role"`
+	// AgentState is the mutable agent loop state: "" | "active" | "waiting" | "done".
+	AgentState string `json:"agent_state"`
 }
 
 // Session represents a single PTY-backed terminal session.
@@ -34,6 +41,13 @@ type Session struct {
 	PID       int
 	ExitCode  int
 	Kind      string // "" = normal/agent session; "fixed" = zpit fixed panel
+	// Identity fields — immutable, set at creation.
+	Source    string
+	ProjectID string
+	IssueID   string
+	Role      string
+	// AgentState is the mutable agent loop state: "" | "active" | "waiting" | "done".
+	AgentState string
 
 	pty      pty.Pty     // PTY handle (ConPTY on Windows, /dev/ptmx on Unix)
 	cmd      *pty.Cmd    // the running subprocess
@@ -302,13 +316,18 @@ func (s *Session) Info() SessionInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return SessionInfo{
-		ID:        s.ID,
-		Title:     s.Title,
-		Status:    s.Status,
-		CreatedAt: s.CreatedAt,
-		PID:       s.PID,
-		ExitCode:  s.ExitCode,
-		Kind:      s.Kind,
+		ID:         s.ID,
+		Title:      s.Title,
+		Status:     s.Status,
+		CreatedAt:  s.CreatedAt,
+		PID:        s.PID,
+		ExitCode:   s.ExitCode,
+		Kind:       s.Kind,
+		Source:     s.Source,
+		ProjectID:  s.ProjectID,
+		IssueID:    s.IssueID,
+		Role:       s.Role,
+		AgentState: s.AgentState,
 	}
 }
 
@@ -325,7 +344,9 @@ func (s *Session) Resize(cols, rows int) error {
 
 // UpdateMeta updates the session's mutable metadata fields.
 // Empty strings are ignored (only non-empty values are applied).
-func (s *Session) UpdateMeta(title, status string) {
+// agentState accepts "" | "active" | "waiting" | "done"; value validation
+// is performed at the API layer, not here.
+func (s *Session) UpdateMeta(title, status, agentState string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if title != "" {
@@ -334,10 +355,14 @@ func (s *Session) UpdateMeta(title, status string) {
 	if status != "" {
 		s.Status = status
 	}
+	if agentState != "" {
+		s.AgentState = agentState
+	}
 	slog.Info("session.UpdateMeta: metadata updated",
 		slog.String("session_id", s.ID),
 		slog.String("title", s.Title),
 		slog.String("status", s.Status),
+		slog.String("agent_state", s.AgentState),
 	)
 }
 
