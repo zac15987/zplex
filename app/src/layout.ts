@@ -101,9 +101,13 @@ export class PanelGrid {
     const element = document.createElement("div");
     element.classList.add("panel");
     element.dataset.sessionId = sessionId;
+    element.dataset.agentState = "";
 
     const headerElement = document.createElement("div");
     headerElement.classList.add("panel-header");
+
+    const statusIndicator = document.createElement("span");
+    statusIndicator.classList.add("panel-status");
 
     const titleSpan = document.createElement("span");
     titleSpan.classList.add("panel-title");
@@ -113,6 +117,7 @@ export class PanelGrid {
     closeBtn.classList.add("panel-close-btn");
     closeBtn.textContent = "\u00d7"; // multiplication sign (x)
 
+    headerElement.appendChild(statusIndicator);
     headerElement.appendChild(titleSpan);
     headerElement.appendChild(closeBtn);
 
@@ -129,6 +134,7 @@ export class PanelGrid {
       element,
       headerElement,
       contentElement,
+      agentState: "",
     };
 
     this.panelOrder.push(sessionId);
@@ -236,6 +242,21 @@ export class PanelGrid {
   /** Look up a panel by session ID. */
   getPanelInfo(sessionId: string): PanelInfo | undefined {
     return this.panelMap.get(sessionId);
+  }
+
+  /**
+   * Set the agent loop state for a panel. Updates the panel root's
+   * data-agent-state attribute (drives the header status indicator color
+   * and the waiting-pulse animation via CSS) and stores it on the PanelInfo.
+   */
+  setAgentState(sessionId: string, state: string): void {
+    const panel = this.panelMap.get(sessionId);
+    if (!panel) {
+      console.warn("[layout] setAgentState: panel not found:", sessionId);
+      return;
+    }
+    panel.agentState = state;
+    panel.element.dataset.agentState = state;
   }
 
   /** Return the current number of panels. */
