@@ -265,8 +265,11 @@ export class FixedPanel {
       // Visual feedback during drag.
       this.splitter.classList.add("dragging");
 
-      // Track the latest ratio so pointerup can persist it.
+      // Track the latest ratio so pointerup can persist it. `moved` stays false
+      // until an actual drag occurs, so a bare click on the splitter does not
+      // overwrite the stored ratio with the default (AC-13).
       let currentRatio = DEFAULT_FIXED_PANEL_RATIO;
+      let moved = false;
 
       const onPointerMove = (e: PointerEvent): void => {
         if (!this.mainSplit || !this.fixedArea || !this.splitter) return;
@@ -282,6 +285,7 @@ export class FixedPanel {
         fixedPx = Math.max(MIN_PANEL_PX, Math.min(fixedPx, total - splitterW - MIN_PANEL_PX));
 
         currentRatio = fixedPx / total;
+        moved = true;
         this.fixedArea.style.width = `${currentRatio * 100}%`;
       };
 
@@ -294,7 +298,10 @@ export class FixedPanel {
         document.removeEventListener("pointermove", onPointerMove);
         document.removeEventListener("pointerup", onPointerUp);
 
-        // Persist ratio and refit terminal to new width.
+        // Only persist + refit when the splitter was actually dragged. A bare
+        // click (pointerdown→pointerup with no move) must leave the stored
+        // ratio untouched.
+        if (!moved) return;
         localStorage.setItem(FIXED_PANEL_RATIO_KEY, String(currentRatio));
         this.wrapper?.fit();
       };
