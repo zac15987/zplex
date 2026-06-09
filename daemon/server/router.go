@@ -35,6 +35,7 @@ type Server struct {
 	layouts   map[string]layoutState // key = workspace ID
 	prefs     *prefs.Store
 	zpitCfg   config.ZpitConfig
+	hub       *Hub
 }
 
 // NewServer creates a Server wired to the given session manager, preferences
@@ -49,6 +50,7 @@ func NewServer(mgr *session.SessionManager, prefsStore *prefs.Store, zpitCfg con
 		layouts:   make(map[string]layoutState),
 		prefs:     prefsStore,
 		zpitCfg:   zpitCfg,
+		hub:       NewHub(),
 	}
 }
 
@@ -63,6 +65,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.handlePatchSession)
+
+	// SSE event stream
+	mux.HandleFunc("GET /api/events", s.handleEvents)
 
 	mux.HandleFunc("GET /api/layout", s.handleGetLayout)
 	mux.HandleFunc("PUT /api/layout", s.handlePutLayout)
@@ -118,6 +123,11 @@ type responseWriter struct {
 	statusCode int
 }
 
+// Compile-time checks that responseWriter implements the interfaces the
+// middleware relies on.
+var _ http.Flusher = (*responseWriter)(nil)
+var _ http.Hijacker = (*responseWriter)(nil)
+
 // WriteHeader captures the status code before delegating to the underlying
 // ResponseWriter.
 func (rw *responseWriter) WriteHeader(code int) {
@@ -133,6 +143,16 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return hj.Hijack()
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// Flush delegates to the underlying ResponseWriter's Flush method if it
+// implements http.Flusher. This is required for Server-Sent Events, which
+// must flush each event to the client immediately. It is a no-op when the
+// underlying writer is not a Flusher.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // loggingMiddleware logs every HTTP request with method, path, status code,

@@ -70,6 +70,14 @@ type CreateOptions struct {
 	Env   []string
 	Cwd   string
 	Kind  string
+	// Source, ProjectID, IssueID, Role are immutable agent-identity metadata
+	// set at creation time and not modified afterward.
+	Source    string
+	ProjectID string
+	IssueID   string
+	Role      string
+	// AgentState is the initial agent loop state: "" | "active" | "waiting" | "done".
+	AgentState string
 }
 
 // CreateSession spawns a new PTY-backed session with the given options.
@@ -82,6 +90,9 @@ func (m *SessionManager) CreateSession(opts CreateOptions) (*Session, error) {
 		slog.Int("cols", opts.Cols),
 		slog.Int("rows", opts.Rows),
 		slog.String("kind", opts.Kind),
+		slog.String("source", opts.Source),
+		slog.String("role", opts.Role),
+		slog.String("agent_state", opts.AgentState),
 	)
 
 	shell := opts.Shell
@@ -99,6 +110,14 @@ func (m *SessionManager) CreateSession(opts CreateOptions) (*Session, error) {
 		)
 		return nil, err
 	}
+
+	// Apply agent-identity metadata. The session is not yet shared (not in the
+	// manager map), so these assignments are safe without holding the lock.
+	sess.Source = opts.Source
+	sess.ProjectID = opts.ProjectID
+	sess.IssueID = opts.IssueID
+	sess.Role = opts.Role
+	sess.AgentState = opts.AgentState
 
 	// Resize if cols/rows specified.
 	if opts.Cols > 0 && opts.Rows > 0 {

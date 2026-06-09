@@ -464,3 +464,68 @@ func TestFixedSession_Helper(t *testing.T) {
 		t.Errorf("expected FixedSession ID %q, got %q", fixedSess.ID, got.ID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Metadata round-trip — AC-13(a) coverage.
+// ---------------------------------------------------------------------------
+
+func TestCreateSession_MetadataRoundTrip(t *testing.T) {
+	mgr := NewSessionManager("pwsh", 102400)
+	defer mgr.Shutdown()
+
+	sess, err := mgr.CreateSession(CreateOptions{
+		Shell:      "pwsh",
+		Title:      "meta-test",
+		Source:     "zpit",
+		ProjectID:  "p",
+		IssueID:    "42",
+		Role:       "coder",
+		AgentState: "active",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	info := sess.Info()
+	if info.Source != "zpit" {
+		t.Errorf("expected Source %q, got %q", "zpit", info.Source)
+	}
+	if info.ProjectID != "p" {
+		t.Errorf("expected ProjectID %q, got %q", "p", info.ProjectID)
+	}
+	if info.IssueID != "42" {
+		t.Errorf("expected IssueID %q, got %q", "42", info.IssueID)
+	}
+	if info.Role != "coder" {
+		t.Errorf("expected Role %q, got %q", "coder", info.Role)
+	}
+	if info.AgentState != "active" {
+		t.Errorf("expected AgentState %q, got %q", "active", info.AgentState)
+	}
+}
+
+func TestUpdateMeta_AgentState(t *testing.T) {
+	mgr := NewSessionManager("pwsh", 102400)
+	defer mgr.Shutdown()
+
+	sess, err := mgr.CreateSession(CreateOptions{
+		Shell:      "pwsh",
+		Title:      "t",
+		AgentState: "active",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	// Non-empty agentState should update the field.
+	sess.UpdateMeta("", "", "waiting")
+	if info := sess.Info(); info.AgentState != "waiting" {
+		t.Errorf("expected AgentState %q after UpdateMeta, got %q", "waiting", info.AgentState)
+	}
+
+	// Empty agentState should leave the field unchanged.
+	sess.UpdateMeta("", "", "")
+	if info := sess.Info(); info.AgentState != "waiting" {
+		t.Errorf("expected AgentState %q (unchanged) after UpdateMeta with empty string, got %q", "waiting", info.AgentState)
+	}
+}

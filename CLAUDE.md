@@ -127,6 +127,7 @@ Key behaviors:
 | `Ctrl+Shift+Arrow` | Move focus to adjacent panel (Up/Down/Left/Right); `Ctrl+Shift+Left` from the leftmost grid panel crosses into the zpit fixed panel, and `Ctrl+Shift+Right` from the zpit fixed panel crosses back to the leftmost grid panel |
 | `Ctrl+Shift+PageUp` | Switch to previous workspace (wraps around) |
 | `Ctrl+Shift+PageDown` | Switch to next workspace (wraps around) |
+| `Ctrl+Shift+J` | Jump focus to next agent panel waiting for permission |
 | `Shift+Click [×]` | Force close dialog (override saved preference) |
 
 ### Daemon REST API
@@ -134,13 +135,13 @@ Key behaviors:
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/health` | Health check + version |
-| GET/POST | `/api/sessions` | List / create sessions |
-| GET/DELETE/PATCH | `/api/sessions/{id}` | Get / kill / update session; DELETE returns HTTP 403 for the fixed (`kind=="fixed"`) session — it cannot be killed from the UI |
+| GET/POST | `/api/sessions` | List / create sessions; create and list carry agent metadata fields `source`, `project_id`, `issue_id`, `role`, `agent_state` (all optional on create) |
+| GET/DELETE/PATCH | `/api/sessions/{id}` | Get / kill / update session; DELETE returns HTTP 403 for the fixed (`kind=="fixed"`) session — it cannot be killed from the UI; PATCH can update `agent_state` (validated against `"" \| "active" \| "waiting" \| "done"`, invalid value → HTTP 400) |
 | GET/PUT | `/api/layout` | Get / save panel layout (per workspace) |
 | GET | `/api/workspaces` | List workspace IDs with layout data |
 | DELETE | `/api/workspaces/{id}` | Delete workspace layout data |
 | GET/PUT | `/api/preferences` | Get / save app-managed user preferences (close behavior), persisted to `~/.zplex/preferences.json` |
-| GET | `/api/events` | SSE stream for real-time updates |
+| GET | `/api/events` | SSE stream for real-time session updates: emits `session.created`, `session.closed`, `session.updated` events, each carrying the affected session's `SessionInfo` as JSON |
 | POST | `/api/zpit/restart` | Kill (if running) and relaunch the fixed zpit session |
 
 ### WebSocket Protocol (`/ws/{session_id}`)
@@ -151,6 +152,17 @@ Key behaviors:
 ### SessionInfo `kind` field
 
 `SessionInfo` (and `Session`) carry a `kind` field in all `GET /api/sessions` and `GET /api/sessions/{id}` responses: `""` for normal/agent sessions, `"fixed"` for the zpit cockpit session.
+
+### SessionInfo agent metadata fields
+
+`SessionInfo` (and `Session`) also carry agent-integration metadata, returned in all `GET /api/sessions` and `GET /api/sessions/{id}` responses and accepted (all optional) by `POST /api/sessions`:
+
+- `source` — origin of the session (e.g. `"zpit"` when spawned by the zpit loop engine); `""` for manually-created terminals.
+- `project_id`, `issue_id` — the zpit project / issue the agent is working on.
+- `role` — the agent's role (e.g. `"coder"`, `"reviewer"`).
+- `agent_state` — the agent's loop state, decoupled from the PTY `status` field. One of `"" | "active" | "waiting" | "done"`. Drives the panel header status indicator (green = active, amber = waiting for permission, grey = done). Mutable via `PATCH /api/sessions/{id}`; any other value is rejected with HTTP 400.
+
+These fields back the M4 "agent panels auto-appear in zplex" integration: when zpit's loop engine spawns a Claude Code agent it POSTs a session with this metadata, the daemon emits a `session.created` SSE event, and the frontend auto-mounts a panel.
 
 ## Tech Stack Constraints
 

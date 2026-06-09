@@ -206,7 +206,7 @@ zplex/
 
 ## 5. Milestones
 
-> **Progress (2026-06-09):** M1, M2, and M3 complete. M3 (issue #13) delivered the always-visible zpit cockpit: the daemon auto-launches a fixed `kind="fixed"` session on startup (configurable via `[zpit]`), protects it from deletion (DELETE → 403) with a `POST /api/zpit/restart` endpoint, and the frontend mounts it in a persistent `#main-split` fixed panel (draggable splitter, exited+Restart overlay, graceful fallback when zpit is absent). M4 (zpit launcher integration) is next.
+> **Progress (2026-06-09):** M1, M2, and M3 complete. M3 (issue #13) delivered the always-visible zpit cockpit: the daemon auto-launches a fixed `kind="fixed"` session on startup (configurable via `[zpit]`), protects it from deletion (DELETE → 403) with a `POST /api/zpit/restart` endpoint, and the frontend mounts it in a persistent `#main-split` fixed panel (draggable splitter, exited+Restart overlay, graceful fallback when zpit is absent). The three zplex-side M4 items are now complete — combined into issue #15 (the same way M3 combined its items into #13): the daemon session creation API with agent metadata (`source`, `project_id`, `issue_id`, `role`, `agent_state`), frontend panel status sync via SSE (`GET /api/events` → recolor panel header by `agent_state`: green=active, amber=waiting, grey=done), and frontend permission focus navigation (pulsing yellow border for `waiting` panels; `Ctrl+Shift+J` jumps to next waiting panel). The zpit-side launcher backend (`EnvZplex` detection + `launchZplex()`) remains tracked in the zpit repo as a separate work item.
 >
 > Note: The original plan's single "Go daemon" issue was split into #1 (session+PTY) and #2 (HTTP+WebSocket) during implementation. The original M2 "multi-panel layout" and "panel resize + keyboard navigation" items were combined into a single issue #7. M3's two planned items were combined into a single issue #13.
 
@@ -269,10 +269,10 @@ zplex/
 
 | Issue | Title | Description | Status | Depends |
 |---|---|---|---|---|
-| TBD | Daemon: session creation API with metadata | Extend POST /api/sessions to accept `source: "zpit"`, `project_id`, `issue_id`, `role` (coder/reviewer). Store metadata for UI display | Planned | M3 |
-| TBD | [zpit repo] New launcher backend: zplex | Add `platform.EnvZplex` detection (check if zplex daemon is running on port 17732). Add `launchZplex()` / `launchZplexInDir()` functions that POST to daemon API instead of exec wt.exe. Add `zplex_mode` to `TerminalConfig`. Fallback: if daemon unreachable, fall back to Windows Terminal | Planned | M3 |
-| TBD | Frontend: panel status sync with zpit loop | Daemon exposes SSE endpoint `/api/events` for panel status updates. When zpit loop transitions state (coding → reviewing → done), update panel header color/icon. Green = active, yellow = waiting permission, grey = done | Planned | zpit launcher |
-| TBD | Frontend: permission focus navigation | When zpit detects agent needs permission (existing signal file mechanism), zplex highlights that panel's border (pulsing yellow) and provides keyboard shortcut to jump to it | Planned | panel status sync |
+| #15 | Daemon: session creation API with metadata | Extend POST /api/sessions to accept `source: "zpit"`, `project_id`, `issue_id`, `role` (coder/reviewer), `agent_state`. Store metadata for UI display. PATCH /api/sessions/{id} updates `agent_state` | ✅ Done (#15) | M3 |
+| TBD | [zpit repo] New launcher backend: zplex | Add `platform.EnvZplex` detection (check if zplex daemon is running on port 17732). Add `launchZplex()` / `launchZplexInDir()` functions that POST to daemon API instead of exec wt.exe. Add `zplex_mode` to `TerminalConfig`. Fallback: if daemon unreachable, fall back to Windows Terminal (tracked in zpit repo, separate from #15) | Planned | M3 |
+| #15 | Frontend: panel status sync with zpit loop | Daemon exposes SSE endpoint `/api/events` for panel status updates. When zpit loop transitions state (coding → reviewing → done), update panel header color/icon. Green = active, amber = waiting permission, grey = done | ✅ Done (#15) | zpit launcher |
+| #15 | Frontend: permission focus navigation | When zpit detects agent needs permission (existing signal file mechanism), zplex highlights that panel's border (pulsing yellow) and provides keyboard shortcut (`Ctrl+Shift+J`) to jump to it | ✅ Done (#15) | panel status sync |
 
 **Integration architecture (M4 complete):**
 

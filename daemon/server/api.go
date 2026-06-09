@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,13 @@ import (
 	"github.com/zac15987/zplex/daemon/prefs"
 	"github.com/zac15987/zplex/daemon/session"
 )
+
+// validAgentStates is the exact set of accepted agent_state values.
+// Empty string is valid and means "no agent loop state".
+var validAgentStates = map[string]bool{"": true, "active": true, "waiting": true, "done": true}
+
+// isValidAgentState reports whether s is an accepted agent_state value.
+func isValidAgentState(s string) bool { return validAgentStates[s] }
 
 // ---------------------------------------------------------------------------
 // Layout state types
@@ -85,13 +93,18 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 // createSessionRequest is the JSON body accepted by POST /api/sessions.
 type createSessionRequest struct {
-	Shell string   `json:"shell"`
-	Title string   `json:"title"`
-	Args  []string `json:"args,omitempty"`
-	Cwd   string   `json:"cwd,omitempty"`
-	Env   []string `json:"env,omitempty"`
-	Cols  int      `json:"cols"`
-	Rows  int      `json:"rows"`
+	Shell      string   `json:"shell"`
+	Title      string   `json:"title"`
+	Args       []string `json:"args,omitempty"`
+	Cwd        string   `json:"cwd,omitempty"`
+	Env        []string `json:"env,omitempty"`
+	Cols       int      `json:"cols"`
+	Rows       int      `json:"rows"`
+	Source     string   `json:"source,omitempty"`
+	ProjectID  string   `json:"project_id,omitempty"`
+	IssueID    string   `json:"issue_id,omitempty"`
+	Role       string   `json:"role,omitempty"`
+	AgentState string   `json:"agent_state,omitempty"`
 }
 
 // createSessionResponse is the JSON payload returned by POST /api/sessions.
@@ -125,14 +138,27 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !isValidAgentState(req.AgentState) {
+		slog.Warn("server.handleCreateSession: invalid agent_state",
+			slog.String("agent_state", req.AgentState),
+		)
+		writeError(w, http.StatusBadRequest, "invalid agent_state")
+		return
+	}
+
 	sess, err := s.mgr.CreateSession(session.CreateOptions{
-		Shell: req.Shell,
-		Title: req.Title,
-		Cols:  req.Cols,
-		Rows:  req.Rows,
-		Args:  req.Args,
-		Cwd:   req.Cwd,
-		Env:   req.Env,
+		Shell:      req.Shell,
+		Title:      req.Title,
+		Cols:       req.Cols,
+		Rows:       req.Rows,
+		Args:       req.Args,
+		Cwd:        req.Cwd,
+		Env:        req.Env,
+		Source:     req.Source,
+		ProjectID:  req.ProjectID,
+		IssueID:    req.IssueID,
+		Role:       req.Role,
+		AgentState: req.AgentState,
 	})
 	if err != nil {
 		slog.Error("server.handleCreateSession: failed to create session",
@@ -145,6 +171,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	slog.Info("server.handleCreateSession: session created",
 		slog.String("session_id", sess.ID),
 	)
+
+	s.hub.Broadcast(Event{Type: "session.created", Session: sess.Info()})
+	s.watchSessionExit(sess)
 
 	writeJSON(w, http.StatusCreated, createSessionResponse{
 		ID:    sess.ID,
@@ -220,13 +249,18 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		slog.String("session_id", id),
 	)
 
+	s.hub.Broadcast(Event{Type: "session.closed", Session: sess.Info()})
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // patchSessionRequest is the JSON body accepted by PATCH /api/sessions/{id}.
+// Identity fields (source, project_id, issue_id, role) are intentionally
+// absent — they are immutable after creation.
 type patchSessionRequest struct {
-	Title  string `json:"title"`
-	Status string `json:"status"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+	AgentState string `json:"agent_state"`
 }
 
 // handlePatchSession updates mutable metadata on an existing session.
@@ -255,11 +289,21 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess.UpdateMeta(req.Title, req.Status)
+	if !isValidAgentState(req.AgentState) {
+		slog.Warn("server.handlePatchSession: invalid agent_state",
+			slog.String("agent_state", req.AgentState),
+		)
+		writeError(w, http.StatusBadRequest, "invalid agent_state")
+		return
+	}
+
+	sess.UpdateMeta(req.Title, req.Status, req.AgentState)
 
 	slog.Info("server.handlePatchSession: session updated",
 		slog.String("session_id", id),
 	)
+
+	s.hub.Broadcast(Event{Type: "session.updated", Session: sess.Info()})
 
 	writeJSON(w, http.StatusOK, sess.Info())
 }
@@ -297,6 +341,10 @@ func (s *Server) LaunchZpit() (*session.Session, error) {
 	slog.Info("server.LaunchZpit: zpit fixed session launched",
 		slog.String("session_id", sess.ID),
 	)
+
+	s.hub.Broadcast(Event{Type: "session.created", Session: sess.Info()})
+	s.watchSessionExit(sess)
+
 	return sess, nil
 }
 
@@ -334,6 +382,75 @@ func (s *Server) handleRestartZpit(w http.ResponseWriter, r *http.Request) {
 		ID:    sess.ID,
 		WsURL: "/ws/" + sess.ID,
 	})
+}
+
+// watchSessionExit starts a goroutine that emits a session.closed event when
+// the given session's process exits naturally (its Done() channel closes).
+// Emission lives at the server-handler layer so the session package stays
+// decoupled from the event Hub.
+func (s *Server) watchSessionExit(sess *session.Session) {
+	go func() {
+		<-sess.Done()
+		slog.Info("server.watchSessionExit: session exited, broadcasting closed",
+			slog.String("session_id", sess.ID))
+		s.hub.Broadcast(Event{Type: "session.closed", Session: sess.Info()})
+	}()
+}
+
+// handleEvents serves the Server-Sent Events stream. Clients subscribe to
+// real-time session lifecycle events (session.created/closed/updated).
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	slog.Info("server.handleEvents: client connecting")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		slog.Error("server.handleEvents: ResponseWriter does not support flushing")
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ch := s.hub.Subscribe()
+	defer s.hub.Unsubscribe(ch)
+
+	ticker := time.NewTicker(HeartbeatInterval)
+	defer ticker.Stop()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("server.handleEvents: client disconnected")
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(ev.Session)
+			if err != nil {
+				slog.Error("server.handleEvents: marshal failed", slog.String("error", err.Error()))
+				continue
+			}
+			// SSE frame: event: <type>\ndata: <json>\n\n
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data); err != nil {
+				slog.Warn("server.handleEvents: write failed", slog.String("error", err.Error()))
+				return
+			}
+			flusher.Flush()
+		case <-ticker.C:
+			// Heartbeat comment keeps the connection alive.
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				slog.Warn("server.handleEvents: heartbeat write failed", slog.String("error", err.Error()))
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
