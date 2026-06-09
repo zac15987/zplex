@@ -20,7 +20,15 @@ export interface SessionInfo {
   created_at: string; // ISO 8601 timestamp
   pid: number;
   exit_code: number;
+  source: string;
+  project_id: string;
+  issue_id: string;
+  role: string;
+  agent_state: string; // "" | "active" | "waiting" | "done" (see AgentState)
 }
+
+/** Agent loop state for a session panel — decoupled from PTY status. */
+export type AgentState = "" | "active" | "waiting" | "done";
 
 /** Request body for POST /api/sessions (server/api.go createSessionRequest). */
 export interface CreateSessionRequest {
@@ -135,6 +143,8 @@ export interface PanelInfo {
   headerElement: HTMLElement;
   /** The terminal content area element. */
   contentElement: HTMLElement;
+  /** Current agent loop state ("" | "active" | "waiting" | "done"); drives the header status indicator. */
+  agentState: string;
 }
 
 /** Computed grid layout dimensions. */
@@ -205,6 +215,19 @@ export interface WorkspaceInfo {
 
 /** Response from GET /api/workspaces — list of workspace IDs with layout data. */
 export type WorkspaceListResponse = string[];
+
+// ---------------------------------------------------------------------------
+// SSE event types (daemon/server/events.go)
+// ---------------------------------------------------------------------------
+
+/** Named SSE event types emitted by the daemon GET /api/events stream. */
+export type ServerEventType = "session.created" | "session.updated" | "session.closed";
+
+/**
+ * Payload of a daemon SSE event. The EventSource `data` field is the
+ * JSON-marshalled SessionInfo for the affected session.
+ */
+export type ServerEventPayload = SessionInfo;
 
 // Ensure this file is treated as a module (required when using `declare global`).
 export {};
