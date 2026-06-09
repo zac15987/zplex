@@ -14,6 +14,7 @@
 import { TerminalWrapper } from "./terminal";
 import { PanelGrid } from "./layout";
 import { WorkspaceManager } from "./workspace";
+import { FixedPanel } from "./fixedpanel";
 import type {
   SessionInfo,
   CreateSessionRequest,
@@ -63,6 +64,9 @@ function getWorkspaceRegistry(workspaceId: string): Map<string, TerminalWrapper>
 
 let panelGrid: PanelGrid | null = null;
 let wsManager: WorkspaceManager | null = null;
+let fixedPanel: FixedPanel | null = null;
+/** True when keyboard focus is currently on the zpit fixed panel (AC-14). */
+let fixedPanelFocused = false;
 
 /** Return the active workspace ID, falling back to DEFAULT_WORKSPACE_ID. */
 function activeWorkspaceId(): string {
@@ -212,10 +216,10 @@ function mountSessionToGrid(sessionId: string, title: string): void {
   const port = getDaemonPort();
   const wrapper = new TerminalWrapper(sessionId, port);
 
-  // Register focus callback: when terminal is clicked, set panel focus
+  // Register focus callback: when terminal is clicked, set panel focus.
+  // Also clears fixed-panel focus state (AC-14).
   wrapper.onFocus((id: string) => {
-    panelGrid?.setFocus(id);
-    wrapper.focusTerminal();
+    focusGridPanel(id);
   });
 
   // Register in workspace registry
@@ -225,10 +229,9 @@ function mountSessionToGrid(sessionId: string, title: string): void {
   // Mount xterm into the panel's content area
   wrapper.mount(panelInfo.contentElement);
 
-  // Wire up header click-to-focus
+  // Wire up header click-to-focus; also clears fixed-panel focus state (AC-14).
   panelInfo.headerElement.addEventListener("mousedown", () => {
-    panelGrid?.setFocus(sessionId);
-    wrapper.focusTerminal();
+    focusGridPanel(sessionId);
   });
 
   // Wire up close button [x] (AC-8, AC-10)
@@ -244,9 +247,8 @@ function mountSessionToGrid(sessionId: string, title: string): void {
     });
   }
 
-  // Set focus on the newly created panel
-  panelGrid.setFocus(sessionId);
-  wrapper.focusTerminal();
+  // Set focus on the newly created panel; also clears fixed-panel focus state.
+  focusGridPanel(sessionId);
 
   console.warn("[app] mountSessionToGrid exit:", sessionId);
 }
@@ -449,25 +451,55 @@ async function closePanelFlow(sessionId: string, forceDialog: boolean): Promise<
 // Focus navigation
 // ---------------------------------------------------------------------------
 
+/** Focus a dynamic-grid panel, clearing the fixed-panel focus state. */
+function focusGridPanel(sessionId: string): void {
+  fixedPanelFocused = false;
+  fixedPanel?.setFocusVisual(false);
+  panelGrid?.setFocus(sessionId);
+  getWorkspaceRegistry(activeWorkspaceId()).get(sessionId)?.focusTerminal();
+}
+
+/** Move keyboard focus onto the zpit fixed panel (AC-14). */
+function focusFixedPanel(): void {
+  fixedPanelFocused = true;
+  fixedPanel?.setFocusVisual(true);
+  fixedPanel?.focusTerminal();
+}
+
 /**
  * Move focus to the adjacent panel in the given direction.
- * If no adjacent panel exists, focus stays on the current panel.
+ * Handles cross-area navigation between the fixed panel and the dynamic grid
+ * (AC-14). Intra-grid navigation is unchanged.
  */
 function moveFocus(direction: "up" | "down" | "left" | "right"): void {
   if (!panelGrid) return;
 
+  // From the fixed panel, only Ctrl+Shift+Right crosses back into the grid.
+  if (fixedPanelFocused) {
+    if (direction === "right") {
+      const ids = panelGrid.getPanelIds();
+      if (ids.length > 0) {
+        focusGridPanel(ids[0]);
+      }
+    }
+    return;
+  }
+
   const currentId = panelGrid.getFocusedPanelId();
   if (!currentId) return;
 
+  // From the leftmost grid panel, Ctrl+Shift+Left crosses into the fixed panel.
+  if (direction === "left" && fixedPanel?.isActive()) {
+    const ids = panelGrid.getPanelIds();
+    if (ids.length > 0 && ids[0] === currentId) {
+      focusFixedPanel();
+      return;
+    }
+  }
+
   const adjacentId = panelGrid.getAdjacentPanelId(currentId, direction);
   if (!adjacentId) return;
-
-  panelGrid.setFocus(adjacentId);
-  const registry = getWorkspaceRegistry(activeWorkspaceId());
-  const wrapper = registry.get(adjacentId);
-  if (wrapper) {
-    wrapper.focusTerminal();
-  }
+  focusGridPanel(adjacentId);
 }
 
 // ---------------------------------------------------------------------------
@@ -502,9 +534,12 @@ async function handleWorkspaceSwitch(fromId: string, toId: string): Promise<void
     `/api/layout?workspace=${encodeURIComponent(toId)}`,
   );
 
-  // 4. Fetch running sessions for title lookup
+  // 4. Fetch running sessions for title lookup.
+  // Exclude the fixed zpit session from the dynamic grid (AC-10).
   const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
-  const runningSessions = sessionList.filter((s) => s.status === "running");
+  const runningSessions = sessionList.filter(
+    (s) => s.status === "running" && s.kind !== "fixed",
+  );
   const runningIds = new Set(runningSessions.map((s) => s.id));
   const titleMap = new Map<string, string>();
   for (const s of runningSessions) {
@@ -558,8 +593,9 @@ async function handleWorkspaceClose(workspaceId: string): Promise<void> {
       `/api/layout?workspace=${encodeURIComponent(workspaceId)}`,
     );
     const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
+    // Exclude the fixed zpit session from workspace close consideration (AC-10).
     const runningIds = new Set(
-      sessionList.filter((s) => s.status === "running").map((s) => s.id),
+      sessionList.filter((s) => s.status === "running" && s.kind !== "fixed").map((s) => s.id),
     );
     for (const panel of layoutState.panels) {
       if (runningIds.has(panel.session_id)) {
@@ -667,6 +703,13 @@ async function init(): Promise<void> {
   // Register resize callback for FitAddon
   panelGrid.onPanelResize(() => {
     refitAllTerminals();
+  });
+
+  // Create the fixed panel once at init (AC-9, AC-12). It is never disposed
+  // by workspace switches or closes — it persists for the app lifetime.
+  fixedPanel = new FixedPanel(getDaemonPort());
+  fixedPanel.onFocusRequest(() => {
+    fixedPanelFocused = true;
   });
 
   // NOTE: onLayoutChange callback is registered AFTER reconciliation completes
@@ -802,9 +845,18 @@ async function init(): Promise<void> {
   const activeWorkspace = wsManager.getActiveId();
   console.warn("[app] active workspace:", activeWorkspace);
 
-  // Fetch sessions and layout state for the active workspace
+  // Fetch sessions and layout state for the active workspace.
+  // Detect and mount the fixed zpit cockpit session first (AC-9, AC-10, AC-11).
   const sessionList = await apiGet<SessionInfo[]>("/api/sessions");
-  const runningSessions = sessionList.filter((s) => s.status === "running");
+  const fixedSession = sessionList.find((s) => s.kind === "fixed");
+  if (fixedSession && fixedPanel) {
+    fixedPanel.mount(fixedSession.id, fixedSession.status);
+  }
+  const hasFixed = fixedSession !== undefined;
+  // Exclude the fixed session from the dynamic-grid running set (AC-10).
+  const runningSessions = sessionList.filter(
+    (s) => s.status === "running" && s.kind !== "fixed",
+  );
   const layoutState = await apiGet<LayoutState>(
     `/api/layout?workspace=${encodeURIComponent(activeWorkspace)}`,
   );
@@ -880,10 +932,15 @@ async function init(): Promise<void> {
         "actual:", actualPanelCount, "), using auto-tiled grid");
     }
 
-    // If no panels were mounted at all, create a fresh one
+    // If no panels were mounted at all, create a fresh one (AC-11: skip when
+    // the fixed zpit cockpit is present — empty grid is intentional).
     if (mountedIds.size === 0) {
-      console.warn("[app] restore: no sessions survived reconciliation, creating initial session");
-      await createAndMountPanel("Terminal 1");
+      if (!hasFixed) {
+        console.warn("[app] restore: no sessions survived reconciliation, creating initial session");
+        await createAndMountPanel("Terminal 1");
+      } else {
+        console.warn("[app] restore: no dynamic sessions; empty grid is intentional because the fixed zpit cockpit is present");
+      }
     }
   } else if (runningSessions.length > 0) {
     // AC-9: No saved layout — fall back to default behavior
@@ -894,9 +951,15 @@ async function init(): Promise<void> {
       }
     }
   } else {
-    // No sessions and no layout — create a fresh one
-    console.warn("[app] no running sessions, creating initial session");
-    await createAndMountPanel("Terminal 1");
+    // No sessions and no layout.
+    if (!hasFixed) {
+      // Create a fresh terminal when no fixed zpit cockpit is present.
+      console.warn("[app] no running sessions, creating initial session");
+      await createAndMountPanel("Terminal 1");
+    } else {
+      // Fixed zpit cockpit is present — start with an empty dynamic grid (AC-11).
+      console.warn("[app] fixed zpit cockpit present; starting with empty dynamic grid");
+    }
   }
 
   // AC-10: Refit all terminals after reconciliation
