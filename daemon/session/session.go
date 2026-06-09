@@ -20,6 +20,7 @@ type SessionInfo struct {
 	CreatedAt time.Time `json:"created_at"`
 	PID       int       `json:"pid"`
 	ExitCode  int       `json:"exit_code"`
+	Kind      string    `json:"kind"`
 }
 
 // Session represents a single PTY-backed terminal session.
@@ -32,6 +33,7 @@ type Session struct {
 	CreatedAt time.Time
 	PID       int
 	ExitCode  int
+	Kind      string // "" = normal/agent session; "fixed" = zpit fixed panel
 
 	pty      pty.Pty     // PTY handle (ConPTY on Windows, /dev/ptmx on Unix)
 	cmd      *pty.Cmd    // the running subprocess
@@ -52,12 +54,16 @@ const readBufSize = 8192
 
 // NewSession spawns a new PTY-backed shell session.
 // The caller provides a unique id, a human-readable title, the shell executable
-// to run, and the ring-buffer capacity in bytes.
-func NewSession(id, title, shell string, bufferSize int) (*Session, error) {
+// to run, optional extra args, an optional working directory (cwd), optional
+// environment variables (env), a kind tag ("" for normal/agent, "fixed" for the
+// zpit fixed panel), and the ring-buffer capacity in bytes.
+func NewSession(id, title, shell string, args []string, cwd string, env []string, kind string, bufferSize int) (*Session, error) {
 	slog.Info("session.NewSession: creating session",
 		slog.String("session_id", id),
 		slog.String("title", title),
 		slog.String("shell", shell),
+		slog.String("kind", kind),
+		slog.Int("args_count", len(args)),
 		slog.Int("buffer_size", bufferSize),
 	)
 
@@ -70,7 +76,13 @@ func NewSession(id, title, shell string, bufferSize int) (*Session, error) {
 		return nil, err
 	}
 
-	cmd := ptmx.Command(shell)
+	cmd := ptmx.Command(shell, args...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	if env != nil {
+		cmd.Env = env
+	}
 	if err := cmd.Start(); err != nil {
 		slog.Error("session.NewSession: failed to start command",
 			slog.String("session_id", id),
@@ -89,6 +101,7 @@ func NewSession(id, title, shell string, bufferSize int) (*Session, error) {
 		Status:    "running",
 		CreatedAt: time.Now(),
 		PID:       pid,
+		Kind:      kind,
 		pty:       ptmx,
 		cmd:       cmd,
 		ringBuf:   newRingBuffer(bufferSize),
@@ -295,6 +308,7 @@ func (s *Session) Info() SessionInfo {
 		CreatedAt: s.CreatedAt,
 		PID:       s.PID,
 		ExitCode:  s.ExitCode,
+		Kind:      s.Kind,
 	}
 }
 
