@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -708,5 +710,286 @@ func TestPreferences_PutInvalidValue(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected status 400 for invalid value, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Session metadata round-trip (AC-2)
+// ---------------------------------------------------------------------------
+
+// TestCreateSession_MetadataRoundTrip verifies that all five identity metadata
+// fields (source, project_id, issue_id, role, agent_state) survive a
+// POST /api/sessions → GET /api/sessions/{id} round-trip.
+func TestCreateSession_MetadataRoundTrip(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	body := `{"shell":"pwsh","title":"meta","source":"zpit","project_id":"p","issue_id":"42","role":"coder","agent_state":"active"}`
+	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/sessions failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected status 201, got %d", resp.StatusCode)
+	}
+
+	var created createSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatal("expected non-empty session ID")
+	}
+
+	getResp, err := http.Get(ts.URL + "/api/sessions/" + created.ID)
+	if err != nil {
+		t.Fatalf("GET /api/sessions/%s failed: %v", created.ID, err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", getResp.StatusCode)
+	}
+
+	var info session.SessionInfo
+	if err := json.NewDecoder(getResp.Body).Decode(&info); err != nil {
+		t.Fatalf("failed to decode session info: %v", err)
+	}
+
+	if info.Source != "zpit" {
+		t.Errorf("Source: expected %q, got %q", "zpit", info.Source)
+	}
+	if info.ProjectID != "p" {
+		t.Errorf("ProjectID: expected %q, got %q", "p", info.ProjectID)
+	}
+	if info.IssueID != "42" {
+		t.Errorf("IssueID: expected %q, got %q", "42", info.IssueID)
+	}
+	if info.Role != "coder" {
+		t.Errorf("Role: expected %q, got %q", "coder", info.Role)
+	}
+	if info.AgentState != "active" {
+		t.Errorf("AgentState: expected %q, got %q", "active", info.AgentState)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// agent_state validation on POST (AC-3)
+// ---------------------------------------------------------------------------
+
+// TestCreateSession_InvalidAgentState verifies that POST /api/sessions with an
+// invalid agent_state value returns HTTP 400 with the exact error message.
+func TestCreateSession_InvalidAgentState(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	body := `{"shell":"pwsh","title":"bad","agent_state":"bogus"}`
+	resp, err := http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/sessions failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", resp.StatusCode)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Error != "invalid agent_state" {
+		t.Errorf("expected error %q, got %q", "invalid agent_state", errResp.Error)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// agent_state on PATCH — valid path (AC-3)
+// ---------------------------------------------------------------------------
+
+// TestPatchSession_AgentState verifies that PATCH /api/sessions/{id} with a
+// valid agent_state value updates the field and returns 200 with the new info.
+func TestPatchSession_AgentState(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	id := createTestSession(t, ts, "patch-agent")
+
+	patchBody := `{"agent_state":"waiting"}`
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/sessions/"+id, strings.NewReader(patchBody))
+	if err != nil {
+		t.Fatalf("failed to create PATCH request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /api/sessions/%s failed: %v", id, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var info session.SessionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		t.Fatalf("failed to decode session info: %v", err)
+	}
+	if info.AgentState != "waiting" {
+		t.Errorf("AgentState: expected %q, got %q", "waiting", info.AgentState)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// agent_state on PATCH — invalid path, session unchanged (AC-3)
+// ---------------------------------------------------------------------------
+
+// TestPatchSession_InvalidAgentState verifies that an invalid agent_state in
+// PATCH returns HTTP 400 and leaves the session's agent_state unchanged.
+func TestPatchSession_InvalidAgentState(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	id := createTestSession(t, ts, "patch-agent-invalid")
+
+	// First, set a known state via a valid PATCH.
+	validPatch := `{"agent_state":"active"}`
+	req1, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/sessions/"+id, strings.NewReader(validPatch))
+	if err != nil {
+		t.Fatalf("failed to create PATCH request: %v", err)
+	}
+	req1.Header.Set("Content-Type", "application/json")
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("PATCH (valid) failed: %v", err)
+	}
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on valid PATCH, got %d", resp1.StatusCode)
+	}
+
+	// Now try an invalid agent_state.
+	invalidPatch := `{"agent_state":"explode"}`
+	req2, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/sessions/"+id, strings.NewReader(invalidPatch))
+	if err != nil {
+		t.Fatalf("failed to create PATCH request: %v", err)
+	}
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("PATCH (invalid) failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected status 400 for invalid agent_state, got %d", resp2.StatusCode)
+	}
+
+	var errResp errorResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&errResp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errResp.Error != "invalid agent_state" {
+		t.Errorf("expected error %q, got %q", "invalid agent_state", errResp.Error)
+	}
+
+	// Verify the session state is still "active" (unchanged by the rejected patch).
+	getResp, err := http.Get(ts.URL + "/api/sessions/" + id)
+	if err != nil {
+		t.Fatalf("GET /api/sessions/%s failed: %v", id, err)
+	}
+	defer getResp.Body.Close()
+
+	var info session.SessionInfo
+	if err := json.NewDecoder(getResp.Body).Decode(&info); err != nil {
+		t.Fatalf("failed to decode session info: %v", err)
+	}
+	if info.AgentState != "active" {
+		t.Errorf("AgentState after invalid PATCH: expected %q, got %q", "active", info.AgentState)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SSE headers and event delivery (AC-4 + AC-13b)
+// ---------------------------------------------------------------------------
+
+// TestEvents_HeadersAndDelivery verifies that GET /api/events returns the
+// correct SSE headers and delivers a session.created event when a session is
+// created while the client is subscribed.
+func TestEvents_HeadersAndDelivery(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/events failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("expected Content-Type text/event-stream, got %q", ct)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("expected Cache-Control no-cache, got %q", cc)
+	}
+	if conn := resp.Header.Get("Connection"); conn != "keep-alive" {
+		t.Errorf("expected Connection keep-alive, got %q", conn)
+	}
+
+	// Give the subscriber goroutine a moment to register, then create a session.
+	time.Sleep(200 * time.Millisecond)
+	go func() {
+		body := `{"shell":"pwsh","title":"sse-test"}`
+		http.Post(ts.URL+"/api/sessions", "application/json", strings.NewReader(body)) //nolint:errcheck
+	}()
+
+	// Read from the stream until we see a session.created event or time out.
+	resultCh := make(chan string, 1)
+	go func() {
+		reader := bufio.NewReader(resp.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.HasPrefix(line, "event: ") {
+				resultCh <- strings.TrimSpace(strings.TrimPrefix(line, "event: "))
+				return
+			}
+		}
+	}()
+
+	select {
+	case evType := <-resultCh:
+		if evType != "session.created" {
+			t.Errorf("expected first event type session.created, got %q", evType)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for session.created SSE event")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// responseWriter implements http.Flusher (AC-6)
+// ---------------------------------------------------------------------------
+
+// TestResponseWriterImplementsFlusher asserts that the responseWriter type
+// satisfies both http.Flusher and http.Hijacker at compile and runtime.
+func TestResponseWriterImplementsFlusher(t *testing.T) {
+	var rw interface{} = &responseWriter{}
+	if _, ok := rw.(http.Flusher); !ok {
+		t.Error("responseWriter does not implement http.Flusher")
+	}
+	if _, ok := rw.(http.Hijacker); !ok {
+		t.Error("responseWriter does not implement http.Hijacker")
 	}
 }
