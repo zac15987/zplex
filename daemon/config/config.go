@@ -21,16 +21,31 @@ const (
 	DefaultBufferSize = 102400
 )
 
+// Default values for zpit integration configuration.
+const (
+	DefaultZpitBin = "zpit"
+)
+
+// ZpitConfig holds configuration for the zpit integration.
+type ZpitConfig struct {
+	Enabled bool
+	Bin     string
+	Config  string
+	Args    []string
+}
+
 // Config holds the runtime configuration for the zplex daemon.
 type Config struct {
 	Port         int
 	DefaultShell string
 	BufferSize   int
+	Zpit         ZpitConfig
 }
 
-// fileConfig mirrors the TOML file structure with a [daemon] section.
+// fileConfig mirrors the TOML file structure with [daemon] and [zpit] sections.
 type fileConfig struct {
-	Daemon daemonConfig `toml:"daemon"`
+	Daemon daemonConfig   `toml:"daemon"`
+	Zpit   zpitFileConfig `toml:"zpit"`
 }
 
 // daemonConfig maps the fields inside the [daemon] TOML section.
@@ -38,6 +53,16 @@ type daemonConfig struct {
 	Port         int    `toml:"port"`
 	DefaultShell string `toml:"default_shell"`
 	BufferSize   int    `toml:"buffer_size"`
+}
+
+// zpitFileConfig maps the fields inside the [zpit] TOML section.
+// Enabled is a *bool to distinguish "not set" (nil → keep default true)
+// from explicit "enabled = false" (false).
+type zpitFileConfig struct {
+	Enabled *bool    `toml:"enabled"`
+	Bin     string   `toml:"bin"`
+	Config  string   `toml:"config"`
+	Args    []string `toml:"args"`
 }
 
 // Load builds a Config by layering sources in priority order:
@@ -50,6 +75,12 @@ func Load() (*Config, error) {
 		Port:         DefaultPort,
 		DefaultShell: DefaultShell,
 		BufferSize:   DefaultBufferSize,
+		Zpit: ZpitConfig{
+			Enabled: true,
+			Bin:     DefaultZpitBin,
+			Config:  "",
+			Args:    []string{},
+		},
 	}
 
 	// Layer 1: TOML config file.
@@ -67,6 +98,8 @@ func Load() (*Config, error) {
 		slog.Int("port", cfg.Port),
 		slog.String("default_shell", cfg.DefaultShell),
 		slog.Int("buffer_size", cfg.BufferSize),
+		slog.Bool("zpit_enabled", cfg.Zpit.Enabled),
+		slog.String("zpit_bin", cfg.Zpit.Bin),
 	)
 	return cfg, nil
 }
@@ -83,9 +116,16 @@ func applyFileConfig(cfg *Config) error {
 	}
 
 	path := filepath.Join(home, ".zplex", "config.toml")
+	return applyFileConfigFromPath(cfg, path)
+}
 
+// applyFileConfigFromPath reads the TOML config at the given path and applies
+// any values found into cfg. If the file does not exist, it silently returns
+// without error. This helper is separate from applyFileConfig to allow unit tests
+// to supply a temp-file path without touching the user's home directory.
+func applyFileConfigFromPath(cfg *Config, path string) error {
 	var fc fileConfig
-	_, err = toml.DecodeFile(path, &fc)
+	_, err := toml.DecodeFile(path, &fc)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// No config file — use defaults without logging an error.
@@ -104,6 +144,19 @@ func applyFileConfig(cfg *Config) error {
 	}
 	if fc.Daemon.BufferSize != 0 {
 		cfg.BufferSize = fc.Daemon.BufferSize
+	}
+
+	if fc.Zpit.Enabled != nil {
+		cfg.Zpit.Enabled = *fc.Zpit.Enabled
+	}
+	if fc.Zpit.Bin != "" {
+		cfg.Zpit.Bin = fc.Zpit.Bin
+	}
+	if fc.Zpit.Config != "" {
+		cfg.Zpit.Config = fc.Zpit.Config
+	}
+	if len(fc.Zpit.Args) > 0 {
+		cfg.Zpit.Args = fc.Zpit.Args
 	}
 
 	return nil
