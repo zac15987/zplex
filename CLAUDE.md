@@ -20,6 +20,9 @@ zplex (zac + multiplex) is a terminal multiplexer desktop app purpose-built for 
 
 ./dev.ps1                  # one-click: rebuild daemon, then `npm run dev`
 ./dev.ps1 -Install         # refresh npm deps first, then rebuild + launch
+
+./kill-daemon.ps1          # stop the daemon left running after closing the app
+./kill-daemon.ps1 -Port N  # target a custom --port / ZPLEX_PORT
 ```
 
 `dev.ps1` is the day-to-day UI test loop (single terminal). It rebuilds
@@ -28,6 +31,11 @@ the latest Go code — without this, dev mode silently runs a stale daemon. The
 auto-spawned daemon's output is discarded (`stdio: "ignore"`); to see daemon
 logs, run `go run .` manually in a separate terminal (the app detects the
 already-running daemon and skips spawning).
+
+The daemon is spawned detached and survives Electron exit by design (see
+`app/electron/main.ts`), so closing the app leaves it running. During the test
+loop, run `./kill-daemon.ps1` after closing the app to stop it — it finds the
+process owning the daemon port and kills it (no Task Manager needed).
 
 ### Go Daemon (`daemon/`)
 
